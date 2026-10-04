@@ -24,12 +24,6 @@ cd C:\Users\Usuario\Desktop\proyectos\unirPDF
 c:\python314\python.exe -m uvicorn app.main:app
 ```
 
-También puedes arrancarlo directamente con:
-
-```powershell
-c:\python314\python.exe app\main.py
-```
-
 Deja esa terminal abierta mientras uses la aplicación. Cuando aparezca este mensaje:
 
 ```text
