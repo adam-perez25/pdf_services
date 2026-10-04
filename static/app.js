@@ -1,3 +1,8 @@
+const serviceMenu = document.querySelector("#service-menu");
+const mergeView = document.querySelector("#merge-view");
+const splitView = document.querySelector("#split-view");
+const serviceButtons = document.querySelectorAll("[data-service]");
+const backButtons = document.querySelectorAll("[data-back]");
 const fileInput = document.querySelector("#file-input");
 const dropzone = document.querySelector("#dropzone");
 const fileList = document.querySelector("#file-list");
@@ -9,6 +14,28 @@ const status = document.querySelector("#status");
 
 let selectedFiles = [];
 let draggedIndex = null;
+
+serviceButtons.forEach((button) => {
+    button.addEventListener("click", () => showService(button.dataset.service));
+});
+
+backButtons.forEach((button) => {
+    button.addEventListener("click", showServiceMenu);
+});
+
+function showService(service) {
+    serviceMenu.hidden = true;
+    mergeView.hidden = service !== "merge";
+    splitView.hidden = service !== "split";
+    window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function showServiceMenu() {
+    serviceMenu.hidden = false;
+    mergeView.hidden = true;
+    splitView.hidden = true;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+}
 
 fileInput.addEventListener("change", () => {
     selectedFiles = [...fileInput.files];

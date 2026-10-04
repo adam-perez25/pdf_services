@@ -33,7 +33,22 @@ body::before {
 h1 { margin: 0; font-size: clamp(42px, 7vw, 76px); line-height: .98; letter-spacing: 0; }
 h1 em { color: var(--accent); font-style: normal; }
 .lede { max-width: 410px; margin: 22px 0 0; color: var(--muted); font-size: 16px; line-height: 1.6; }
+.service-menu { padding: 30px; background: rgba(255, 255, 255, .82); border: 1px solid var(--line); box-shadow: 0 24px 70px rgba(57, 71, 62, .08); }
+.service-menu h2 { margin-bottom: 22px; }
+.service-grid { display: grid; gap: 10px; }
+.service-card { display: grid; grid-template-columns: 42px minmax(0, 1fr) 30px; align-items: center; gap: 16px; width: 100%; padding: 20px; border: 1px solid var(--line); color: var(--ink); background: var(--white); text-align: left; cursor: pointer; transition: border-color .2s, background .2s, transform .2s; }
+.service-card:hover { border-color: var(--accent); background: #fff8f2; transform: translateX(4px); }
+.service-index { color: var(--accent); font: 500 12px "DM Mono", monospace; }
+.service-copy strong, .service-copy small { display: block; }
+.service-copy strong { font-size: 16px; }
+.service-copy small { margin-top: 5px; color: var(--muted); font-size: 12px; }
+.service-arrow { color: var(--accent-dark); font-size: 22px; }
 .workspace { padding: 30px; background: rgba(255, 255, 255, .82); border: 1px solid var(--line); box-shadow: 0 24px 70px rgba(57, 71, 62, .08); }
+.view-heading { margin-bottom: 42px; }
+.view-heading h2 { margin-top: 18px; font-size: 34px; }
+.view-lede { max-width: 480px; margin: 12px 0 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
+.back-button { margin-bottom: 28px; padding: 0; border: 0; color: var(--accent-dark); background: transparent; font: 500 12px "DM Mono", monospace; cursor: pointer; }
+.back-button:hover { color: var(--ink); }
 .section-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
 h2 { margin: 0; font-size: 24px; line-height: 1.1; }
 .counter { color: var(--muted); font: 500 12px "DM Mono", monospace; }
@@ -64,5 +79,6 @@ h2 { margin: 0; font-size: 24px; line-height: 1.1; }
     .shell { width: min(100% - 24px, 920px); padding-top: 42px; }
     .workspace { padding: 20px; }
     h1 { font-size: 43px; }
+    .service-menu, .workspace { padding: 20px; }
     .file-item { grid-template-columns: 30px minmax(0, 1fr) 28px 28px 28px; gap: 3px; }
 }

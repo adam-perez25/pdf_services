@@ -3,22 +3,52 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Unir PDF</title>
+    <title>PDF Toolkit</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
     <main class="shell">
         <section class="intro">
             <p class="eyebrow">PDF TOOLKIT</p>
-            <h1>Une tus documentos<br><em>en el orden correcto.</em></h1>
-            <p class="lede">Selecciona tus archivos, ordénalos y descarga un único PDF.</p>
+            <h1>Herramientas para<br><em>tus PDFs.</em></h1>
+            <p class="lede">Elige una función para empezar a trabajar con tus documentos.</p>
         </section>
 
-        <section class="workspace" aria-labelledby="files-title">
+        <section id="service-menu" class="service-menu" aria-labelledby="services-title">
+            <p class="eyebrow">SERVICIOS</p>
+            <h2 id="services-title">¿Qué quieres hacer?</h2>
+            <div class="service-grid">
+                <button class="service-card" type="button" data-service="merge">
+                    <span class="service-index">01</span>
+                    <span class="service-copy">
+                        <strong>Unir PDF</strong>
+                        <small>Combina varios documentos en uno.</small>
+                    </span>
+                    <span class="service-arrow" aria-hidden="true">&#8594;</span>
+                </button>
+                <button class="service-card" type="button" data-service="split">
+                    <span class="service-index">02</span>
+                    <span class="service-copy">
+                        <strong>Dividir PDF</strong>
+                        <small>Separa un documento en varios archivos.</small>
+                    </span>
+                    <span class="service-arrow" aria-hidden="true">&#8594;</span>
+                </button>
+            </div>
+        </section>
+
+        <section id="merge-view" class="workspace service-view" aria-labelledby="merge-title" hidden>
+            <div class="view-heading">
+                <button class="back-button" type="button" data-back>&#8592; Servicios</button>
+                <p class="eyebrow">SERVICIO 01 / UNIR</p>
+                <h2 id="merge-title">Une tus documentos</h2>
+                <p class="view-lede">Selecciona tus archivos y ordénalos antes de descargarlos como un único PDF.</p>
+            </div>
+
             <div class="section-heading">
                 <div>
                     <p class="eyebrow">01 / DOCUMENTOS</p>
-                    <h2 id="files-title">Tu selección</h2>
+                    <h2>Tu selección</h2>
                 </div>
                 <span id="file-count" class="counter">0 archivos</span>
             </div>
@@ -50,6 +80,15 @@
                 </button>
             </form>
             <p id="status" class="status" role="status"></p>
+        </section>
+
+        <section id="split-view" class="workspace service-view" aria-labelledby="split-title" hidden>
+            <div class="view-heading">
+                <button class="back-button" type="button" data-back>&#8592; Servicios</button>
+                <p class="eyebrow">SERVICIO 02 / DIVIDIR</p>
+                <h2 id="split-title">Dividir PDF</h2>
+                <p class="view-lede">Esta herramienta estará disponible próximamente.</p>
+            </div>
         </section>
     </main>
     <script src="/static/app.js"></script>
