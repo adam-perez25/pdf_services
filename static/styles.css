@@ -1,0 +1,68 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;600;700;800&display=swap');
+
+:root {
+    --ink: #17211f;
+    --muted: #70807b;
+    --line: #dce5df;
+    --paper: #f5f7f2;
+    --white: #ffffff;
+    --accent: #e46d4b;
+    --accent-dark: #b84d32;
+    --mint: #dcece1;
+}
+
+* { box-sizing: border-box; }
+body {
+    margin: 0;
+    min-height: 100vh;
+    color: var(--ink);
+    background: var(--paper);
+    font-family: "Manrope", "Trebuchet MS", sans-serif;
+}
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    opacity: .45;
+    background: radial-gradient(circle at 85% 12%, #f2d6af 0 12%, transparent 32%), radial-gradient(circle at 5% 90%, var(--mint) 0 9%, transparent 30%);
+}
+.shell { width: min(920px, calc(100% - 40px)); margin: 0 auto; padding: 74px 0 90px; }
+.intro { margin-bottom: 54px; }
+.eyebrow { margin: 0 0 12px; color: var(--accent-dark); font: 500 11px/1 "DM Mono", monospace; letter-spacing: 0; }
+h1 { margin: 0; font-size: clamp(42px, 7vw, 76px); line-height: .98; letter-spacing: 0; }
+h1 em { color: var(--accent); font-style: normal; }
+.lede { max-width: 410px; margin: 22px 0 0; color: var(--muted); font-size: 16px; line-height: 1.6; }
+.workspace { padding: 30px; background: rgba(255, 255, 255, .82); border: 1px solid var(--line); box-shadow: 0 24px 70px rgba(57, 71, 62, .08); }
+.section-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
+h2 { margin: 0; font-size: 24px; line-height: 1.1; }
+.counter { color: var(--muted); font: 500 12px "DM Mono", monospace; }
+.dropzone { display: flex; align-items: center; gap: 15px; min-height: 92px; margin: 24px 0 18px; padding: 20px 24px; border: 1px dashed #a9bdb2; background: #f8fbf7; cursor: pointer; transition: border-color .2s, background .2s, transform .2s; }
+.dropzone:hover, .dropzone.is-dragging { border-color: var(--accent); background: #fff5ee; transform: translateY(-2px); }
+.dropzone input { display: none; }
+.drop-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--accent); color: white; font-size: 26px; line-height: 1; }
+.dropzone strong, .dropzone small { display: block; }
+.dropzone small { margin-top: 4px; color: var(--muted); font-size: 12px; }
+.empty-state { padding: 20px; color: var(--muted); border: 1px solid var(--line); font-size: 13px; text-align: center; }
+.file-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.file-item { display: grid; grid-template-columns: 38px minmax(0, 1fr) 32px 32px 32px; align-items: center; gap: 8px; min-height: 52px; padding: 6px 10px; border: 1px solid var(--line); background: var(--white); cursor: grab; }
+.file-item.is-dragging { opacity: .45; border-color: var(--accent); }
+.file-number { color: var(--accent); font: 500 12px "DM Mono", monospace; }
+.file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.move-button, .remove-button { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 18px; }
+.move-button:hover, .remove-button:hover { color: var(--accent-dark); }
+.output-heading { margin-top: 42px; }
+.name-field { display: block; margin-top: 20px; }
+.name-field span { display: block; margin-bottom: 8px; color: var(--muted); font: 500 11px "DM Mono", monospace; }
+.name-field input { width: 100%; padding: 14px 15px; border: 1px solid var(--line); color: var(--ink); background: var(--white); font: 600 14px "Manrope", sans-serif; outline: none; }
+.name-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(228, 109, 75, .12); }
+.primary-button { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 16px; padding: 16px 18px; border: 0; color: white; background: var(--ink); font: 700 14px "Manrope", sans-serif; cursor: pointer; }
+.primary-button:hover { background: var(--accent-dark); }
+.status { min-height: 20px; margin: 13px 0 0; color: #35704d; font-size: 13px; }
+.status.is-error { color: #b13d2a; }
+@media (max-width: 620px) {
+    .shell { width: min(100% - 24px, 920px); padding-top: 42px; }
+    .workspace { padding: 20px; }
+    h1 { font-size: 43px; }
+    .file-item { grid-template-columns: 30px minmax(0, 1fr) 28px 28px 28px; gap: 3px; }
+}
