@@ -68,9 +68,12 @@ h2 { margin: 0; font-size: 24px; line-height: 1.1; }
 .move-button:hover, .remove-button:hover { color: var(--accent-dark); }
 .output-heading { margin-top: 42px; }
 .name-field { display: block; margin-top: 20px; }
+.name-field[hidden] { display: none; }
+.range-names[hidden] { display: none; }
+.range-name-field { margin-top: 12px; }
 .name-field span { display: block; margin-bottom: 8px; color: var(--muted); font: 500 11px "DM Mono", monospace; }
-.name-field input { width: 100%; padding: 14px 15px; border: 1px solid var(--line); color: var(--ink); background: var(--white); font: 600 14px "Manrope", sans-serif; outline: none; }
-.name-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(228, 109, 75, .12); }
+.name-field input, .name-field select { width: 100%; padding: 14px 15px; border: 1px solid var(--line); color: var(--ink); background: var(--white); font: 600 14px "Manrope", sans-serif; outline: none; }
+.name-field input:focus, .name-field select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(228, 109, 75, .12); }
 .primary-button { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 16px; padding: 16px 18px; border: 0; color: white; background: var(--ink); font: 700 14px "Manrope", sans-serif; cursor: pointer; }
 .primary-button:hover { background: var(--accent-dark); }
 .status { min-height: 20px; margin: 13px 0 0; color: #35704d; font-size: 13px; }

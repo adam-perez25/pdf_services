@@ -5,7 +5,7 @@ import re
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pypdf import PdfWriter
+from pypdf import PdfReader, PdfWriter
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -19,11 +19,16 @@ async def home():
     return HTMLResponse(html)
 
 
-def clean_output_name(output_name: str) -> str:
+def clean_base_name(output_name: str, default: str) -> str:
     name = Path(output_name.strip()).name
     name = re.sub(r"[^A-Za-z0-9._ -]", "_", name).strip(" .")
     if not name:
-        name = "merged.pdf"
+        name = default
+    return name
+
+
+def clean_output_name(output_name: str) -> str:
+    name = clean_base_name(output_name, "merged")
     if not name.lower().endswith(".pdf"):
         name += ".pdf"
     return name
@@ -70,6 +75,70 @@ async def merge_pdfs(
         media_type="application/pdf",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
+@app.post("/api/pdf-info")
+async def pdf_info(file: UploadFile = File(...)):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+
+    try:
+        reader = PdfReader(file.file)
+        return {"pages": len(reader.pages)}
+    except Exception as error:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se pudo leer el PDF: {error}",
+        ) from error
+    finally:
+        await file.close()
+
+
+@app.post("/api/split")
+async def split_pdf(
+    file: UploadFile = File(...),
+    output_name: str = Form("split-pdf"),
+    start_page: int = Form(1),
+    end_page: int | None = Form(None),
+):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+
+    try:
+        reader = PdfReader(file.file)
+        page_count = len(reader.pages)
+        end_page = end_page or page_count
+        if start_page < 1 or end_page < start_page or end_page > page_count:
+            raise HTTPException(
+                status_code=400,
+                detail=f"El rango debe estar entre 1 y {page_count}.",
+            )
+
+        writer = PdfWriter()
+        for page_index in range(start_page - 1, end_page):
+            writer.add_page(reader.pages[page_index])
+
+        output = BytesIO()
+        writer.write(output)
+        writer.close()
+        output.seek(0)
+    except Exception as error:
+        if isinstance(error, HTTPException):
+            raise
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se pudo dividir el PDF: {error}",
+        ) from error
+    finally:
+        await file.close()
+
+    return Response(
+        content=output.getvalue(),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{clean_output_name(output_name)}"',
         },
     )
 
