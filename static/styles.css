@@ -48,8 +48,11 @@ h1 em { color: var(--accent); font-style: normal; }
 .view-heading { margin-bottom: 42px; }
 .view-heading h2 { margin-top: 18px; font-size: 34px; }
 .view-lede { max-width: 480px; margin: 12px 0 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
-.back-button { margin-bottom: 28px; padding: 0; border: 0; color: var(--accent-dark); background: transparent; font: 500 12px "DM Mono", monospace; cursor: pointer; }
-.back-button:hover { color: var(--ink); }
+.service-page .intro { margin-bottom: 14px; }
+.service-back { margin-bottom: 12px; }
+.back-button { display: inline-flex; align-items: center; min-height: 34px; padding: 7px 11px; border: 1px solid var(--line); color: var(--accent-dark); background: rgba(255, 255, 255, .82); font: 500 11px "DM Mono", monospace; text-decoration: none; cursor: pointer; transition: border-color .2s, background .2s, color .2s; }
+.back-button:visited { color: var(--accent-dark); }
+.back-button:hover { border-color: var(--accent); color: var(--ink); background: var(--white); }
 .section-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
 h2 { margin: 0; font-size: 24px; line-height: 1.1; }
 .counter { color: var(--muted); font: 500 12px "DM Mono", monospace; }
