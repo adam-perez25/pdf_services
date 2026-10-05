@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Word a PDF | PDF Toolkit</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <main class="shell service-page">
+        <section class="intro">
+            <p class="eyebrow">SERVICIO 04 / CONVERTIR</p>
+            <h1>Convierte Word<br><em>en un PDF.</em></h1>
+            <p class="lede">Sube un documento DOC o DOCX y descarga su versión en PDF.</p>
+        </section>
+
+        <nav class="service-back" aria-label="Navegación del servicio">
+            <a class="back-button" href="/">&#8592; Menu</a>
+        </nav>
+
+        <section class="workspace" aria-labelledby="word-title">
+            <div class="view-heading">
+                <h2 id="word-title">Documento Word</h2>
+                <p class="view-lede">La conversión conserva el formato mediante LibreOffice.</p>
+            </div>
+
+            <form id="word-form">
+                <label class="dropzone" for="word-input" id="word-dropzone">
+                    <span class="drop-icon">+</span>
+                    <span><strong>Seleccionar documento</strong><small id="word-file-name">o arrástralo aquí</small></span>
+                    <input id="word-input" type="file" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+                </label>
+
+                <label class="name-field">
+                    <span>Nombre del PDF</span>
+                    <input id="word-output-name" type="text" value="document.pdf" maxlength="120" autocomplete="off">
+                </label>
+                <button class="primary-button" type="submit">
+                    <span>Convertir y descargar PDF</span>
+                    <span aria-hidden="true">&#8594;</span>
+                </button>
+            </form>
+            <p id="word-status" class="status" role="status"></p>
+        </section>
+    </main>
+    <script src="/static/word.js"></script>
+</body>
+</html>

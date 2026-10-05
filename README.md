@@ -4,11 +4,12 @@ Servicio web para trabajar con archivos PDF desde el navegador: unir varios docu
 
 El fichero `main.py` original se conserva como versión de escritorio. La aplicación web vive en `app/` y usa FastAPI y `pypdf`.
 
-La interfaz web ofrece tres servicios:
+La interfaz web ofrece cuatro servicios:
 
 - **Unir PDF:** selecciona varios archivos, cambia su orden y descarga un único PDF.
 - **Dividir PDF:** selecciona un archivo y descarga los resultados como PDFs independientes, sin ZIP. Puedes crear un PDF por página o indicar rangos como `1-3, 4-6`, con un nombre diferente para cada rango.
 - **Imágenes a PDF:** selecciona varias imágenes, cambia su orden y descarga un único PDF con una página por imagen.
+- **Word a PDF:** convierte documentos `.doc` y `.docx` a PDF usando LibreOffice en modo headless.
 
 ## Uso actual: aplicación de escritorio
 
@@ -106,5 +107,6 @@ Endpoints disponibles:
 - `POST /api/pdf-info`: obtiene el número de páginas de un PDF.
 - `POST /api/split`: devuelve un PDF correspondiente al rango solicitado.
 - `POST /api/images-to-pdf`: convierte imágenes ordenadas en páginas de un PDF.
+- `POST /api/word-to-pdf`: convierte un documento Word en PDF.
 
 En el modo de división por páginas se realizan varias descargas individuales. El navegador puede pedir permiso para permitir varias descargas del mismo sitio.

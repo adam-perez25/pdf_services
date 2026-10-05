@@ -1,6 +1,9 @@
 from io import BytesIO
 from pathlib import Path
 import re
+import shutil
+import subprocess
+import tempfile
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, Response
@@ -32,6 +35,11 @@ async def split_page():
 @app.get("/images", response_class=HTMLResponse)
 async def images_page():
     return render_page("images.html")
+
+
+@app.get("/word", response_class=HTMLResponse)
+async def word_page():
+    return render_page("word.html")
 
 
 def render_page(template_name: str) -> HTMLResponse:
@@ -206,6 +214,68 @@ async def images_to_pdf(
 
     return Response(
         content=output.getvalue(),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{clean_output_name(output_name)}"',
+        },
+    )
+
+
+@app.post("/api/word-to-pdf")
+async def word_to_pdf(
+    file: UploadFile = File(...),
+    output_name: str = Form("document.pdf"),
+):
+    file_extension = Path(file.filename or "").suffix.lower()
+    if file_extension not in {".doc", ".docx"}:
+        raise HTTPException(status_code=400, detail="El archivo debe ser DOC o DOCX.")
+
+    soffice = shutil.which("soffice") or shutil.which("soffice.exe")
+    if not soffice:
+        raise HTTPException(
+            status_code=503,
+            detail="LibreOffice no está instalado o no está disponible en el PATH.",
+        )
+
+    try:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            input_path = temporary_path / f"source{file_extension}"
+            input_path.write_bytes(await file.read())
+            profile_path = temporary_path / "profile"
+            result = subprocess.run(
+                [
+                    soffice,
+                    "--headless",
+                    f"-env:UserInstallation={profile_path.as_uri()}",
+                    "--convert-to",
+                    "pdf",
+                    "--outdir",
+                    str(temporary_path),
+                    str(input_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+            output_path = temporary_path / "source.pdf"
+            if result.returncode != 0 or not output_path.exists():
+                detail = result.stderr.strip() or result.stdout.strip()
+                raise RuntimeError(detail or "LibreOffice no pudo convertir el documento.")
+            output = output_path.read_bytes()
+    except subprocess.TimeoutExpired as error:
+        raise HTTPException(status_code=504, detail="La conversión tardó demasiado.") from error
+    except Exception as error:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se pudo convertir el documento: {error}",
+        ) from error
+    finally:
+        await file.close()
+
+    return Response(
+        content=output,
         media_type="application/pdf",
         headers={
             "Content-Disposition": f'attachment; filename="{clean_output_name(output_name)}"',
