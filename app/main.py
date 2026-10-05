@@ -15,7 +15,21 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 @app.get("/", response_class=HTMLResponse)
 async def home():
-    html = (BASE_DIR / "templates" / "index.html").read_text(encoding="utf-8")
+    return render_page("index.html")
+
+
+@app.get("/merge", response_class=HTMLResponse)
+async def merge_page():
+    return render_page("merge.html")
+
+
+@app.get("/split", response_class=HTMLResponse)
+async def split_page():
+    return render_page("split.html")
+
+
+def render_page(template_name: str) -> HTMLResponse:
+    html = (BASE_DIR / "templates" / template_name).read_text(encoding="utf-8")
     return HTMLResponse(html)
 
 

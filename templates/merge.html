@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Unir PDF | PDF Toolkit</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <main class="shell service-page">
+        <section class="intro">
+            <a class="back-button" href="/">&#8592; Servicios</a>
+            <p class="eyebrow">SERVICIO 01 / UNIR</p>
+            <h1>Une tus documentos<br><em>en el orden correcto.</em></h1>
+            <p class="lede">Selecciona tus archivos, ordénalos y descarga un único PDF.</p>
+        </section>
+
+        <section class="workspace" aria-labelledby="files-title">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">01 / DOCUMENTOS</p>
+                    <h2 id="files-title">Tu selección</h2>
+                </div>
+                <span id="file-count" class="counter">0 archivos</span>
+            </div>
+
+            <label class="dropzone" for="file-input" id="dropzone">
+                <span class="drop-icon">+</span>
+                <span><strong>Seleccionar PDFs</strong><small>o arrástralos aquí</small></span>
+                <input id="file-input" type="file" accept="application/pdf,.pdf" multiple>
+            </label>
+
+            <div id="empty-state" class="empty-state">Todavía no has seleccionado ningún archivo.</div>
+            <ol id="file-list" class="file-list" aria-live="polite"></ol>
+
+            <div class="section-heading output-heading">
+                <div>
+                    <p class="eyebrow">02 / EXPORTAR</p>
+                    <h2>Nombre del resultado</h2>
+                </div>
+            </div>
+
+            <form id="merge-form">
+                <label class="name-field">
+                    <span>Nombre del PDF</span>
+                    <input id="output-name" type="text" value="merged.pdf" maxlength="120" autocomplete="off">
+                </label>
+                <button class="primary-button" type="submit">
+                    <span>Unir y descargar</span>
+                    <span aria-hidden="true">&#8594;</span>
+                </button>
+            </form>
+            <p id="status" class="status" role="status"></p>
+        </section>
+    </main>
+    <script src="/static/merge.js"></script>
+</body>
+</html>

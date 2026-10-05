@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dividir PDF | PDF Toolkit</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <main class="shell service-page">
+        <section class="intro">
+            <a class="back-button" href="/">&#8592; Servicios</a>
+            <p class="eyebrow">SERVICIO 02 / DIVIDIR</p>
+            <h1>Divide tus documentos<br><em>a tu medida.</em></h1>
+            <p class="lede">Crea un PDF por página o usa rangos personalizados.</p>
+        </section>
+
+        <section class="workspace" aria-labelledby="split-title">
+            <div class="view-heading">
+                <h2 id="split-title">Dividir PDF</h2>
+                <p class="view-lede">Cada resultado se descarga como un PDF independiente.</p>
+            </div>
+
+            <form id="split-form">
+                <label class="dropzone split-dropzone" for="split-file-input" id="split-dropzone">
+                    <span class="drop-icon">+</span>
+                    <span><strong>Seleccionar un PDF</strong><small id="split-file-name">o arrástralo aquí</small></span>
+                    <input id="split-file-input" type="file" accept="application/pdf,.pdf">
+                </label>
+
+                <label class="name-field">
+                    <span>Modo de división</span>
+                    <select id="split-mode">
+                        <option value="pages">Una página por PDF</option>
+                        <option value="ranges">Rangos personalizados</option>
+                    </select>
+                </label>
+
+                <label id="split-ranges-field" class="name-field" hidden>
+                    <span>Rangos de páginas</span>
+                    <input id="split-ranges" type="text" placeholder="Ejemplo: 1-3, 4-6" maxlength="120" autocomplete="off">
+                </label>
+
+                <div id="split-range-names" class="range-names" hidden></div>
+
+                <label id="split-base-name-field" class="name-field">
+                    <span>Nombre base de los PDFs</span>
+                    <input id="split-output-name" type="text" value="split-pdf" maxlength="120" autocomplete="off">
+                </label>
+                <button class="primary-button" type="submit">
+                    <span>Dividir y descargar</span>
+                    <span aria-hidden="true">&#8594;</span>
+                </button>
+            </form>
+            <p id="split-status" class="status" role="status"></p>
+        </section>
+    </main>
+    <script src="/static/split.js"></script>
+</body>
+</html>
