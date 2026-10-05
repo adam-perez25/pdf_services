@@ -1,8 +1,13 @@
 # Unir PDF
 
-Servicio web para seleccionar, reordenar y unir cualquier cantidad de archivos PDF.
+Servicio web para trabajar con archivos PDF desde el navegador: unir varios documentos o dividir uno por páginas y rangos personalizados.
 
 El fichero `main.py` original se conserva como versión de escritorio. La aplicación web vive en `app/` y usa FastAPI y `pypdf`.
+
+La interfaz web ofrece dos servicios:
+
+- **Unir PDF:** selecciona varios archivos, cambia su orden y descarga un único PDF.
+- **Dividir PDF:** selecciona un archivo y descarga los resultados como PDFs independientes, sin ZIP. Puedes crear un PDF por página o indicar rangos como `1-3, 4-6`, con un nombre diferente para cada rango.
 
 ## Uso actual: aplicación de escritorio
 
@@ -92,4 +97,12 @@ docker run --rm --name unir-pdf-web -p 8000:8000 unir-pdf
 
 Abre `http://localhost:8000` en el navegador. Para detener el contenedor, pulsa `Ctrl + C`.
 
-Los PDFs se envían al endpoint `/api/merge`, se procesan en una carpeta temporal gestionada por FastAPI y el resultado se devuelve como descarga. No se guarda ningún PDF en la aplicación después de responder.
+Los PDFs se procesan en memoria o en archivos temporales gestionados por FastAPI y se devuelven como descargas. No se guardan permanentemente en la aplicación después de responder.
+
+Endpoints disponibles:
+
+- `POST /api/merge`: une varios PDFs en el orden recibido.
+- `POST /api/pdf-info`: obtiene el número de páginas de un PDF.
+- `POST /api/split`: devuelve un PDF correspondiente al rango solicitado.
+
+En el modo de división por páginas se realizan varias descargas individuales. El navegador puede pedir permiso para permitir varias descargas del mismo sitio.
