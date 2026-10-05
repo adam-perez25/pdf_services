@@ -37,6 +37,7 @@ h1 em { color: var(--accent); font-style: normal; }
 .service-menu h2 { margin-bottom: 22px; }
 .service-grid { display: grid; gap: 10px; }
 .service-card { display: grid; grid-template-columns: 42px minmax(0, 1fr) 30px; align-items: center; gap: 16px; width: 100%; padding: 20px; border: 1px solid var(--line); color: var(--ink); background: var(--white); text-align: left; text-decoration: none; cursor: pointer; transition: border-color .2s, background .2s, transform .2s; }
+.service-card, .service-card:visited, .service-card * { color: inherit; text-decoration: none !important; text-decoration-line: none !important; }
 .service-card:hover { border-color: var(--accent); background: #fff8f2; transform: translateX(4px); }
 .service-index { color: var(--accent); font: 500 12px "DM Mono", monospace; }
 .service-copy strong, .service-copy small { display: block; }
