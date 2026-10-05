@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Imágenes a PDF | PDF Toolkit</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <main class="shell service-page">
+        <section class="intro">
+            <a class="back-button" href="/">&#8592; Servicios</a>
+            <p class="eyebrow">SERVICIO 03 / CONVERTIR</p>
+            <h1>Convierte imágenes<br><em>en un PDF.</em></h1>
+            <p class="lede">Selecciona, ordena y descarga tus imágenes como un único documento.</p>
+        </section>
+
+        <section class="workspace" aria-labelledby="images-title">
+            <div class="view-heading">
+                <h2 id="images-title">Imágenes seleccionadas</h2>
+                <p class="view-lede">Cada imagen ocupará una página del PDF en el orden mostrado.</p>
+            </div>
+
+            <form id="images-form">
+                <label class="dropzone" for="images-input" id="images-dropzone">
+                    <span class="drop-icon">+</span>
+                    <span><strong>Seleccionar imágenes</strong><small>o arrástralas aquí</small></span>
+                    <input id="images-input" type="file" accept="image/*" multiple>
+                </label>
+
+                <div id="images-empty" class="empty-state">Todavía no has seleccionado ninguna imagen.</div>
+                <ol id="images-list" class="image-list" aria-live="polite"></ol>
+
+                <label class="name-field">
+                    <span>Nombre del PDF</span>
+                    <input id="images-output-name" type="text" value="images.pdf" maxlength="120" autocomplete="off">
+                </label>
+                <button class="primary-button" type="submit">
+                    <span>Crear y descargar PDF</span>
+                    <span aria-hidden="true">&#8594;</span>
+                </button>
+            </form>
+            <p id="images-status" class="status" role="status"></p>
+        </section>
+    </main>
+    <script src="/static/images.js"></script>
+</body>
+</html>

@@ -5,6 +5,7 @@ import re
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
+from PIL import Image, UnidentifiedImageError
 from pypdf import PdfReader, PdfWriter
 
 
@@ -26,6 +27,11 @@ async def merge_page():
 @app.get("/split", response_class=HTMLResponse)
 async def split_page():
     return render_page("split.html")
+
+
+@app.get("/images", response_class=HTMLResponse)
+async def images_page():
+    return render_page("images.html")
 
 
 def render_page(template_name: str) -> HTMLResponse:
@@ -147,6 +153,56 @@ async def split_pdf(
         ) from error
     finally:
         await file.close()
+
+    return Response(
+        content=output.getvalue(),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{clean_output_name(output_name)}"',
+        },
+    )
+
+
+@app.post("/api/images-to-pdf")
+async def images_to_pdf(
+    images: list[UploadFile] = File(...),
+    output_name: str = Form("images.pdf"),
+):
+    if not images:
+        raise HTTPException(status_code=400, detail="Selecciona al menos una imagen.")
+
+    converted_images = []
+    try:
+        for image_file in images:
+            try:
+                with Image.open(image_file.file) as image:
+                    converted_images.append(image.convert("RGB"))
+            except (UnidentifiedImageError, OSError) as error:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El archivo {image_file.filename or 'seleccionado'} no es una imagen válida.",
+                ) from error
+
+        output = BytesIO()
+        converted_images[0].save(
+            output,
+            format="PDF",
+            save_all=True,
+            append_images=converted_images[1:],
+        )
+        output.seek(0)
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se pudo convertir las imágenes: {error}",
+        ) from error
+    finally:
+        for image in converted_images:
+            image.close()
+        for image_file in images:
+            await image_file.close()
 
     return Response(
         content=output.getvalue(),
