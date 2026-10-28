@@ -17,6 +17,7 @@ from pypdf import PdfReader, PdfWriter
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 THUMBNAIL_WIDTH = 220
+PREVIEW_WIDTH = 1400
 app = FastAPI(title="Unir PDF")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
@@ -213,6 +214,43 @@ def pdf_thumbnails(file: UploadFile = File(...)):
         file.file.close()
 
     return {"pages": len(thumbnails), "thumbnails": thumbnails}
+
+
+@app.post("/api/pdf-page-preview")
+def pdf_page_preview(file: UploadFile = File(...), page: int = Form(...)):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+
+    try:
+        document = pypdfium2.PdfDocument(file.file.read())
+        try:
+            if page < 1 or page > len(document):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"La página debe estar entre 1 y {len(document)}.",
+                )
+            pdf_page = document[page - 1]
+            scale = min(PREVIEW_WIDTH / pdf_page.get_width(), 4)
+            bitmap = pdf_page.render(scale=scale)
+            image = bitmap.to_pil()
+            output = BytesIO()
+            image.convert("RGB").save(output, format="JPEG", quality=85)
+            image.close()
+            bitmap.close()
+            pdf_page.close()
+        finally:
+            document.close()
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se pudo leer el PDF: {error}",
+        ) from error
+    finally:
+        file.file.close()
+
+    return Response(content=output.getvalue(), media_type="image/jpeg")
 
 
 @app.post("/api/edit-pages")

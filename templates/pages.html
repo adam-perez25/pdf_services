@@ -62,6 +62,25 @@
             <p id="pages-status" class="status" role="status"></p>
         </section>
     </main>
+
+    <dialog id="page-preview" class="page-preview" aria-labelledby="page-preview-title">
+        <div class="preview-header">
+            <div>
+                <p class="eyebrow" id="page-preview-position"></p>
+                <h2 id="page-preview-title"></h2>
+            </div>
+            <button class="tool-button" type="button" id="page-preview-close" aria-label="Cerrar vista previa">&times; Cerrar</button>
+        </div>
+        <div class="preview-stage">
+            <img id="page-preview-image" alt="">
+        </div>
+        <div class="preview-actions">
+            <button class="tool-button" type="button" data-preview="prev" aria-label="Página anterior">&#8592; Anterior</button>
+            <button class="tool-button" type="button" data-preview="ccw" aria-label="Girar a la izquierda">&#8634;</button>
+            <button class="tool-button" type="button" data-preview="cw" aria-label="Girar a la derecha">&#8635;</button>
+            <button class="tool-button" type="button" data-preview="next" aria-label="Página siguiente">Siguiente &#8594;</button>
+        </div>
+    </dialog>
     <script src="/static/pages.js"></script>
 </body>
 </html>

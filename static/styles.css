@@ -77,7 +77,16 @@ h2 { margin: 0; font-size: 24px; line-height: 1.1; }
 .page-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
 .page-card { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); background: var(--white); cursor: grab; }
 .page-card.is-dragging { opacity: .45; border-color: var(--accent); }
-.page-thumb { display: grid; place-items: center; aspect-ratio: 1; overflow: hidden; background: var(--paper); }
+.page-thumb { display: grid; place-items: center; width: 100%; aspect-ratio: 1; padding: 0; overflow: hidden; border: 1px solid transparent; background: var(--paper); cursor: zoom-in; transition: border-color .2s; }
+.page-thumb:hover, .page-thumb:focus-visible { border-color: var(--accent); outline: none; }
+.page-preview { --stage-width: min(88vw, 1000px); --stage-height: calc(100vh - 210px); width: calc(var(--stage-width) + 48px); max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); padding: 20px 24px; border: 1px solid var(--line); color: var(--ink); background: var(--white); box-shadow: 0 24px 70px rgba(23, 33, 31, .25); }
+.page-preview::backdrop { background: rgba(23, 33, 31, .6); }
+.preview-header { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.preview-stage { display: grid; place-items: center; height: var(--stage-height); margin: 16px 0; overflow: hidden; background: var(--paper); }
+.preview-stage img { max-width: var(--stage-width); max-height: var(--stage-height); box-shadow: 0 4px 16px rgba(23, 33, 31, .2); transition: transform .2s; }
+.preview-stage img.is-sideways { max-width: var(--stage-height); max-height: var(--stage-width); }
+.preview-actions { display: flex; justify-content: center; gap: 8px; }
+.preview-actions .tool-button:disabled { opacity: .4; cursor: default; }
 .page-thumb img { max-width: 72%; max-height: 72%; box-shadow: 0 2px 8px rgba(23, 33, 31, .18); transition: transform .2s; pointer-events: none; }
 .page-meta { display: flex; align-items: baseline; justify-content: space-between; }
 .page-meta small { color: var(--muted); font: 500 11px "DM Mono", monospace; }

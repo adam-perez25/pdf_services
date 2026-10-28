@@ -9,11 +9,17 @@ const pageCount = document.querySelector("#page-count");
 const pagesForm = document.querySelector("#pages-form");
 const pagesOutputName = document.querySelector("#pages-output-name");
 const pagesStatus = document.querySelector("#pages-status");
+const pagePreview = document.querySelector("#page-preview");
+const pagePreviewTitle = document.querySelector("#page-preview-title");
+const pagePreviewPosition = document.querySelector("#page-preview-position");
+const pagePreviewImage = document.querySelector("#page-preview-image");
 
 let selectedFile = null;
 let thumbnails = [];
 let pages = [];
 let draggedIndex = null;
+let previewIndex = null;
+let previewUrls = new Map();
 
 pagesFileInput.addEventListener("change", () => {
     if (pagesFileInput.files[0]) loadFile(pagesFileInput.files[0]);
@@ -47,6 +53,8 @@ pagesReset.addEventListener("click", () => {
 
 async function loadFile(file) {
     selectedFile = file;
+    previewUrls.forEach((url) => URL.revokeObjectURL(url));
+    previewUrls = new Map();
     pagesFileName.textContent = file.name;
     pagesOutputName.value = file.name.replace(/\.pdf$/i, "") + "-edited.pdf";
     thumbnails = [];
@@ -92,9 +100,9 @@ function renderPages() {
         item.className = "page-card";
         item.draggable = true;
         item.innerHTML = `
-            <div class="page-thumb">
+            <button class="page-thumb" type="button" aria-label="Ampliar página ${page.page}">
                 <img src="${thumbnails[page.page - 1]}" alt="Página ${page.page}" style="transform: rotate(${page.rotation}deg)">
-            </div>
+            </button>
             <div class="page-meta">
                 <span class="file-number">${String(index + 1).padStart(2, "0")}</span>
                 <small>pág. ${page.page}</small>
@@ -119,6 +127,7 @@ function renderPages() {
             event.stopPropagation();
             movePage(draggedIndex, index);
         });
+        item.querySelector(".page-thumb").addEventListener("click", () => openPreview(index));
         item.querySelector('[data-action="left"]').addEventListener("click", () => movePage(index, index - 1));
         item.querySelector('[data-action="right"]').addEventListener("click", () => movePage(index, index + 1));
         item.querySelector('[data-action="ccw"]').addEventListener("click", () => rotatePage(index, -90));
@@ -142,6 +151,68 @@ function rotatePage(index, degrees) {
     pages[index].rotation += degrees;
     renderPages();
 }
+
+function openPreview(index) {
+    previewIndex = index;
+    renderPreview();
+    if (!pagePreview.open) pagePreview.showModal();
+}
+
+async function renderPreview() {
+    const page = pages[previewIndex];
+    pagePreviewTitle.textContent = `Página ${page.page}`;
+    pagePreviewPosition.textContent = `POSICIÓN ${previewIndex + 1} DE ${pages.length}`;
+    pagePreviewImage.alt = `Página ${page.page}`;
+    pagePreviewImage.style.transform = `rotate(${page.rotation}deg)`;
+    pagePreviewImage.classList.toggle("is-sideways", Math.abs(page.rotation / 90) % 2 === 1);
+    pagePreview.querySelector('[data-preview="prev"]').disabled = previewIndex === 0;
+    pagePreview.querySelector('[data-preview="next"]').disabled = previewIndex === pages.length - 1;
+
+    // Show the thumbnail straight away and swap in the sharp render once it arrives.
+    pagePreviewImage.src = previewUrls.get(page.page) || thumbnails[page.page - 1];
+    if (previewUrls.has(page.page)) return;
+
+    try {
+        const file = selectedFile;
+        const formData = new FormData();
+        formData.append("file", file, file.name);
+        formData.append("page", page.page);
+        const response = await fetch("/api/pdf-page-preview", { method: "POST", body: formData });
+        if (!response.ok) throw new Error((await response.json()).detail || "No se pudo cargar la vista previa.");
+        const url = URL.createObjectURL(await response.blob());
+        if (selectedFile !== file) {
+            URL.revokeObjectURL(url);
+            return;
+        }
+        previewUrls.set(page.page, url);
+        if (pagePreview.open && pages[previewIndex] === page) pagePreviewImage.src = url;
+    } catch (error) {
+        setStatus(error.message, true);
+    }
+}
+
+pagePreview.querySelector('[data-preview="prev"]').addEventListener("click", () => {
+    if (previewIndex > 0) openPreview(previewIndex - 1);
+});
+pagePreview.querySelector('[data-preview="next"]').addEventListener("click", () => {
+    if (previewIndex < pages.length - 1) openPreview(previewIndex + 1);
+});
+pagePreview.querySelector('[data-preview="ccw"]').addEventListener("click", () => {
+    rotatePage(previewIndex, -90);
+    renderPreview();
+});
+pagePreview.querySelector('[data-preview="cw"]').addEventListener("click", () => {
+    rotatePage(previewIndex, 90);
+    renderPreview();
+});
+document.querySelector("#page-preview-close").addEventListener("click", () => pagePreview.close());
+pagePreview.addEventListener("click", (event) => {
+    if (event.target === pagePreview) pagePreview.close();
+});
+pagePreview.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowLeft" && previewIndex > 0) openPreview(previewIndex - 1);
+    if (event.key === "ArrowRight" && previewIndex < pages.length - 1) openPreview(previewIndex + 1);
+});
 
 pagesForm.addEventListener("submit", async (event) => {
     event.preventDefault();

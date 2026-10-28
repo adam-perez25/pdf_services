@@ -21,6 +21,7 @@ mismo servidor y no requiere un frontend independiente.
   modo headless.
 - **Organizar páginas:** muestra una vista previa de cada página y permite
   girarlas, eliminarlas y reordenarlas antes de descargar el PDF resultante.
+  Al pulsar una página se abre una vista ampliada en alta resolución.
 
 Los archivos se procesan durante la solicitud y se devuelven como descargas.
 La aplicación no incluye almacenamiento permanente de documentos.
@@ -134,6 +135,7 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 | `POST` | `/api/images-to-pdf` | Convierte las imágenes recibidas como `images`. |
 | `POST` | `/api/word-to-pdf` | Convierte un archivo `.doc` o `.docx`. |
 | `POST` | `/api/pdf-thumbnails` | Devuelve una miniatura JPEG (data URL) por página. |
+| `POST` | `/api/pdf-page-preview` | Devuelve la página `page` como imagen JPEG en alta resolución. |
 | `POST` | `/api/edit-pages` | Genera un PDF a partir de `pages`, una lista JSON como `[{"page": 3, "rotation": 90}]`; las páginas omitidas se eliminan. |
 
 Los endpoints que generan archivos aceptan el campo opcional `output_name`
