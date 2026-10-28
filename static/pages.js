@@ -17,7 +17,8 @@ const pagePreviewImage = document.querySelector("#page-preview-image");
 let selectedFile = null;
 let thumbnails = [];
 let pages = [];
-let draggedIndex = null;
+let drag = null;
+let suppressClick = false;
 let previewIndex = null;
 let previewUrls = new Map();
 
@@ -98,7 +99,7 @@ function renderPages() {
     pages.forEach((page, index) => {
         const item = document.createElement("li");
         item.className = "page-card";
-        item.draggable = true;
+        item.dataset.index = index;
         item.innerHTML = `
             <button class="page-thumb" type="button" aria-label="Ampliar página ${page.page}">
                 <img src="${thumbnails[page.page - 1]}" alt="Página ${page.page}" style="transform: rotate(${page.rotation}deg)">
@@ -116,18 +117,10 @@ function renderPages() {
             </div>
         `;
 
-        item.addEventListener("dragstart", () => {
-            draggedIndex = index;
-            item.classList.add("is-dragging");
+        item.addEventListener("pointerdown", (event) => startDrag(event, item));
+        item.querySelector(".page-thumb").addEventListener("click", () => {
+            if (!suppressClick) openPreview(index);
         });
-        item.addEventListener("dragend", () => item.classList.remove("is-dragging"));
-        item.addEventListener("dragover", (event) => event.preventDefault());
-        item.addEventListener("drop", (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            movePage(draggedIndex, index);
-        });
-        item.querySelector(".page-thumb").addEventListener("click", () => openPreview(index));
         item.querySelector('[data-action="left"]').addEventListener("click", () => movePage(index, index - 1));
         item.querySelector('[data-action="right"]').addEventListener("click", () => movePage(index, index + 1));
         item.querySelector('[data-action="ccw"]').addEventListener("click", () => rotatePage(index, -90));
@@ -151,6 +144,133 @@ function rotatePage(index, degrees) {
     pages[index].rotation += degrees;
     renderPages();
 }
+
+// Drag to reorder with pointer events so it works with both mouse and touch.
+// A mouse drag starts after a small movement; a touch drag needs a short
+// press-and-hold so normal swipes still scroll the page.
+const DRAG_THRESHOLD = 6;
+const TOUCH_HOLD_MS = 250;
+const EDGE_SCROLL_ZONE = 70;
+
+function startDrag(event, item) {
+    if (drag || event.button !== 0 || event.target.closest(".page-actions")) return;
+    drag = {
+        item,
+        pointerId: event.pointerId,
+        isTouch: event.pointerType !== "mouse",
+        startX: event.clientX,
+        startY: event.clientY,
+        x: event.clientX,
+        y: event.clientY,
+        active: false,
+        ghost: null,
+        holdTimer: null,
+        scrollFrame: null,
+    };
+    if (drag.isTouch) drag.holdTimer = setTimeout(activateDrag, TOUCH_HOLD_MS);
+    document.addEventListener("pointermove", moveDrag);
+    document.addEventListener("pointerup", endDrag);
+    document.addEventListener("pointercancel", cancelDrag);
+}
+
+function activateDrag() {
+    const rect = drag.item.getBoundingClientRect();
+    drag.offsetX = drag.startX - rect.left;
+    drag.offsetY = drag.startY - rect.top;
+    drag.ghost = drag.item.cloneNode(true);
+    drag.ghost.classList.add("page-ghost");
+    drag.ghost.style.width = `${rect.width}px`;
+    document.body.appendChild(drag.ghost);
+    drag.item.classList.add("is-placeholder");
+    document.body.classList.add("is-reordering");
+    drag.active = true;
+    if (navigator.vibrate && drag.isTouch) navigator.vibrate(15);
+    positionGhost();
+    drag.scrollFrame = requestAnimationFrame(autoScroll);
+}
+
+function moveDrag(event) {
+    if (event.pointerId !== drag.pointerId) return;
+    drag.x = event.clientX;
+    drag.y = event.clientY;
+    const distance = Math.hypot(drag.x - drag.startX, drag.y - drag.startY);
+
+    if (!drag.active) {
+        if (drag.isTouch && distance > DRAG_THRESHOLD) cancelDrag();
+        else if (!drag.isTouch && distance > DRAG_THRESHOLD) activateDrag();
+        return;
+    }
+
+    event.preventDefault();
+    positionGhost();
+    placeAtPointer();
+}
+
+function positionGhost() {
+    drag.ghost.style.transform = `translate(${drag.x - drag.offsetX}px, ${drag.y - drag.offsetY}px) rotate(2deg)`;
+}
+
+function placeAtPointer() {
+    const target = document.elementFromPoint(drag.x, drag.y)?.closest(".page-card");
+    if (!target || target === drag.item || target.parentElement !== pageGrid) return;
+    const cards = [...pageGrid.children];
+    const movingForward = cards.indexOf(target) > cards.indexOf(drag.item);
+    pageGrid.insertBefore(drag.item, movingForward ? target.nextSibling : target);
+}
+
+function autoScroll() {
+    if (!drag?.active) return;
+    if (drag.y < EDGE_SCROLL_ZONE) window.scrollBy(0, -12);
+    else if (drag.y > window.innerHeight - EDGE_SCROLL_ZONE) window.scrollBy(0, 12);
+    placeAtPointer();
+    drag.scrollFrame = requestAnimationFrame(autoScroll);
+}
+
+function endDrag(event) {
+    if (event.pointerId !== drag.pointerId) return;
+    const wasActive = drag.active;
+    const newOrder = [...pageGrid.children].map((card) => pages[Number(card.dataset.index)]);
+    finishDrag();
+    if (!wasActive) return;
+
+    // The click that follows pointerup must not open the preview.
+    suppressClick = true;
+    setTimeout(() => { suppressClick = false; }, 0);
+    pages = newOrder;
+    renderPages();
+}
+
+function cancelDrag() {
+    const wasActive = drag.active;
+    finishDrag();
+    if (wasActive) renderPages();
+}
+
+function finishDrag() {
+    clearTimeout(drag.holdTimer);
+    cancelAnimationFrame(drag.scrollFrame);
+    drag.ghost?.remove();
+    drag.item.classList.remove("is-placeholder");
+    document.body.classList.remove("is-reordering");
+    document.removeEventListener("pointermove", moveDrag);
+    document.removeEventListener("pointerup", endDrag);
+    document.removeEventListener("pointercancel", cancelDrag);
+    drag = null;
+}
+
+pageGrid.addEventListener("click", (event) => {
+    if (!suppressClick) return;
+    event.preventDefault();
+    event.stopPropagation();
+}, true);
+
+// Stop the page from scrolling under a touch drag; this listener must not be passive.
+document.addEventListener("touchmove", (event) => {
+    if (drag?.active) event.preventDefault();
+}, { passive: false });
+pageGrid.addEventListener("contextmenu", (event) => {
+    if (drag) event.preventDefault();
+});
 
 function openPreview(index) {
     previewIndex = index;

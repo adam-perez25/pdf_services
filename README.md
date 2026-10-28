@@ -20,7 +20,9 @@ mismo servidor y no requiere un frontend independiente.
 - **Word a PDF:** convierte archivos `.doc` y `.docx` mediante LibreOffice en
   modo headless.
 - **Organizar páginas:** muestra una vista previa de cada página y permite
-  girarlas, eliminarlas y reordenarlas antes de descargar el PDF resultante.
+  girarlas, eliminarlas y reordenarlas (con los botones o arrastrándolas, también
+  en pantallas táctiles manteniendo pulsada la página) antes de descargar el PDF
+  resultante.
   Al pulsar una página se abre una vista ampliada en alta resolución.
 
 Los archivos se procesan durante la solicitud y se devuelven como descargas.

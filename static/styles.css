@@ -75,8 +75,11 @@ h2 { margin: 0; font-size: 24px; line-height: 1.1; }
 .tool-button { min-height: 34px; padding: 7px 11px; border: 1px solid var(--line); color: var(--ink); background: var(--white); font: 500 11px "DM Mono", monospace; cursor: pointer; transition: border-color .2s, color .2s; }
 .tool-button:hover { border-color: var(--accent); color: var(--accent-dark); }
 .page-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
-.page-card { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); background: var(--white); cursor: grab; }
-.page-card.is-dragging { opacity: .45; border-color: var(--accent); }
+.page-card { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); background: var(--white); cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.page-card.is-placeholder { border: 1px dashed var(--accent); background: #fff5ee; }
+.page-card.is-placeholder > * { visibility: hidden; }
+.page-ghost { position: fixed; top: 0; left: 0; z-index: 10; margin: 0; list-style: none; pointer-events: none; border-color: var(--accent); box-shadow: 0 18px 40px rgba(23, 33, 31, .25); opacity: .95; }
+body.is-reordering, body.is-reordering * { cursor: grabbing !important; }
 .page-thumb { display: grid; place-items: center; width: 100%; aspect-ratio: 1; padding: 0; overflow: hidden; border: 1px solid transparent; background: var(--paper); cursor: zoom-in; transition: border-color .2s; }
 .page-thumb:hover, .page-thumb:focus-visible { border-color: var(--accent); outline: none; }
 .page-preview { --stage-width: min(88vw, 1000px); --stage-height: calc(100vh - 210px); width: calc(var(--stage-width) + 48px); max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); padding: 20px 24px; border: 1px solid var(--line); color: var(--ink); background: var(--white); box-shadow: 0 24px 70px rgba(23, 33, 31, .25); }
