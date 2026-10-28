@@ -1,4 +1,6 @@
+import base64
 from io import BytesIO
+import json
 from pathlib import Path
 import re
 import shutil
@@ -9,10 +11,12 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
+import pypdfium2
 from pypdf import PdfReader, PdfWriter
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+THUMBNAIL_WIDTH = 220
 app = FastAPI(title="Unir PDF")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
@@ -40,6 +44,11 @@ async def images_page():
 @app.get("/word", response_class=HTMLResponse)
 async def word_page():
     return render_page("word.html")
+
+
+@app.get("/pages", response_class=HTMLResponse)
+async def pages_page():
+    return render_page("pages.html")
 
 
 def render_page(template_name: str) -> HTMLResponse:
@@ -161,6 +170,103 @@ async def split_pdf(
         ) from error
     finally:
         await file.close()
+
+    return Response(
+        content=output.getvalue(),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{clean_output_name(output_name)}"',
+        },
+    )
+
+
+# Rendering and rewriting pages is CPU-bound, so these endpoints are plain
+# functions: FastAPI runs them in a worker thread and the server stays responsive.
+@app.post("/api/pdf-thumbnails")
+def pdf_thumbnails(file: UploadFile = File(...)):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+
+    try:
+        document = pypdfium2.PdfDocument(file.file.read())
+        try:
+            thumbnails = []
+            for page in document:
+                bitmap = page.render(scale=THUMBNAIL_WIDTH / page.get_width())
+                image = bitmap.to_pil()
+                output = BytesIO()
+                image.convert("RGB").save(output, format="JPEG", quality=70)
+                thumbnails.append(
+                    "data:image/jpeg;base64," + base64.b64encode(output.getvalue()).decode("ascii")
+                )
+                image.close()
+                bitmap.close()
+                page.close()
+        finally:
+            document.close()
+    except Exception as error:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se pudo leer el PDF: {error}",
+        ) from error
+    finally:
+        file.file.close()
+
+    return {"pages": len(thumbnails), "thumbnails": thumbnails}
+
+
+@app.post("/api/edit-pages")
+def edit_pages(
+    file: UploadFile = File(...),
+    pages: str = Form(...),
+    output_name: str = Form("edited.pdf"),
+):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+
+    try:
+        layout = json.loads(pages)
+        if not isinstance(layout, list) or not layout:
+            raise ValueError
+        layout = [(int(item["page"]), int(item.get("rotation", 0))) for item in layout]
+    except (ValueError, TypeError, KeyError) as error:
+        file.file.close()
+        raise HTTPException(
+            status_code=400,
+            detail="La lista de páginas no es válida.",
+        ) from error
+
+    try:
+        reader = PdfReader(file.file)
+        page_count = len(reader.pages)
+        writer = PdfWriter()
+        for page_number, rotation in layout:
+            if page_number < 1 or page_number > page_count:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Las páginas deben estar entre 1 y {page_count}.",
+                )
+            if rotation % 90 != 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="La rotación debe ser múltiplo de 90 grados.",
+                )
+            page = writer.add_page(reader.pages[page_number - 1])
+            if rotation % 360:
+                page.rotate(rotation % 360)
+
+        output = BytesIO()
+        writer.write(output)
+        writer.close()
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se pudo editar el PDF: {error}",
+        ) from error
+    finally:
+        file.file.close()
 
     return Response(
         content=output.getvalue(),
