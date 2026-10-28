@@ -1,4 +1,3 @@
-import base64
 from io import BytesIO
 import json
 from pathlib import Path
@@ -6,6 +5,9 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
+import uuid
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, Response
@@ -16,8 +18,14 @@ from pypdf import PdfReader, PdfWriter
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-THUMBNAIL_WIDTH = 220
-PREVIEW_WIDTH = 1400
+DOCUMENTS_DIR = Path(tempfile.gettempdir()) / "pdf-toolkit-documents"
+DOCUMENTS_DIR.mkdir(exist_ok=True)
+DOCUMENT_TTL_SECONDS = 60 * 60
+DOCUMENT_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
+PDFIUM_LOCK = threading.Lock()
+THUMBNAIL_WIDTH = 300
+MIN_RENDER_WIDTH = 100
+MAX_RENDER_WIDTH = 2000
 app = FastAPI(title="Unir PDF")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
@@ -181,31 +189,89 @@ async def split_pdf(
     )
 
 
+# The page organizer uploads a PDF once and then refers to it by id, so
+# thumbnails, previews and the final save never upload the file again.
+# Documents live in a temporary folder and are removed after DOCUMENT_TTL_SECONDS
+# without use (or when the page asks for it).
+#
 # Rendering and rewriting pages is CPU-bound, so these endpoints are plain
 # functions: FastAPI runs them in a worker thread and the server stays responsive.
-@app.post("/api/pdf-thumbnails")
-def pdf_thumbnails(file: UploadFile = File(...)):
+def get_document_path(document_id: str) -> Path:
+    if not DOCUMENT_ID_PATTERN.fullmatch(document_id):
+        raise HTTPException(status_code=404, detail="Documento no encontrado.")
+    path = DOCUMENTS_DIR / f"{document_id}.pdf"
+    if not path.exists():
+        # 410 tells the page the upload expired, so it can send the file again.
+        raise HTTPException(
+            status_code=410,
+            detail="El documento ha caducado. Vuelve a seleccionar el PDF.",
+        )
+    path.touch()
+    return path
+
+
+def remove_expired_documents() -> None:
+    limit = time.time() - DOCUMENT_TTL_SECONDS
+    for path in DOCUMENTS_DIR.glob("*.pdf"):
+        try:
+            if path.stat().st_mtime < limit:
+                path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def build_edited_pdf(reader: PdfReader, pages: str) -> bytes:
+    try:
+        layout = json.loads(pages)
+        if not isinstance(layout, list) or not layout:
+            raise ValueError
+        layout = [(int(item["page"]), int(item.get("rotation", 0))) for item in layout]
+    except (ValueError, TypeError, KeyError) as error:
+        raise HTTPException(
+            status_code=400,
+            detail="La lista de páginas no es válida.",
+        ) from error
+
+    page_count = len(reader.pages)
+    writer = PdfWriter()
+    for page_number, rotation in layout:
+        if page_number < 1 or page_number > page_count:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Las páginas deben estar entre 1 y {page_count}.",
+            )
+        if rotation % 90 != 0:
+            raise HTTPException(
+                status_code=400,
+                detail="La rotación debe ser múltiplo de 90 grados.",
+            )
+        page = writer.add_page(reader.pages[page_number - 1])
+        if rotation % 360:
+            page.rotate(rotation % 360)
+
+    output = BytesIO()
+    writer.write(output)
+    writer.close()
+    return output.getvalue()
+
+
+@app.post("/api/documents")
+def upload_document(file: UploadFile = File(...)):
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
 
+    remove_expired_documents()
+    document_id = uuid.uuid4().hex
+    path = DOCUMENTS_DIR / f"{document_id}.pdf"
     try:
-        document = pypdfium2.PdfDocument(file.file.read())
-        try:
-            thumbnails = []
-            for page in document:
-                bitmap = page.render(scale=THUMBNAIL_WIDTH / page.get_width())
-                image = bitmap.to_pil()
-                output = BytesIO()
-                image.convert("RGB").save(output, format="JPEG", quality=70)
-                thumbnails.append(
-                    "data:image/jpeg;base64," + base64.b64encode(output.getvalue()).decode("ascii")
-                )
-                image.close()
-                bitmap.close()
-                page.close()
-        finally:
+        with path.open("wb") as destination:
+            shutil.copyfileobj(file.file, destination)
+        with PDFIUM_LOCK:
+            document = pypdfium2.PdfDocument(path)
+            page_count = len(document)
             document.close()
     except Exception as error:
+        path.unlink(missing_ok=True)
         raise HTTPException(
             status_code=400,
             detail=f"No se pudo leer el PDF: {error}",
@@ -213,44 +279,72 @@ def pdf_thumbnails(file: UploadFile = File(...)):
     finally:
         file.file.close()
 
-    return {"pages": len(thumbnails), "thumbnails": thumbnails}
+    return {"id": document_id, "pages": page_count}
 
 
-@app.post("/api/pdf-page-preview")
-def pdf_page_preview(file: UploadFile = File(...), page: int = Form(...)):
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+@app.get("/api/documents/{document_id}/pages/{page}")
+def document_page_image(document_id: str, page: int, width: int = THUMBNAIL_WIDTH):
+    path = get_document_path(document_id)
+    width = max(MIN_RENDER_WIDTH, min(width, MAX_RENDER_WIDTH))
 
-    try:
-        document = pypdfium2.PdfDocument(file.file.read())
+    # pdfium is not thread-safe, so renders run one at a time.
+    with PDFIUM_LOCK:
+        document = pypdfium2.PdfDocument(path)
         try:
             if page < 1 or page > len(document):
                 raise HTTPException(
-                    status_code=400,
+                    status_code=404,
                     detail=f"La página debe estar entre 1 y {len(document)}.",
                 )
             pdf_page = document[page - 1]
-            scale = min(PREVIEW_WIDTH / pdf_page.get_width(), 4)
-            bitmap = pdf_page.render(scale=scale)
+            bitmap = pdf_page.render(scale=min(width / pdf_page.get_width(), 4))
             image = bitmap.to_pil()
             output = BytesIO()
-            image.convert("RGB").save(output, format="JPEG", quality=85)
+            image.convert("RGB").save(output, format="JPEG", quality=80)
             image.close()
             bitmap.close()
             pdf_page.close()
         finally:
             document.close()
+
+    return Response(
+        content=output.getvalue(),
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@app.post("/api/documents/{document_id}/edit")
+def edit_document(
+    document_id: str,
+    pages: str = Form(...),
+    output_name: str = Form("edited.pdf"),
+):
+    path = get_document_path(document_id)
+    try:
+        content = build_edited_pdf(PdfReader(path), pages)
     except HTTPException:
         raise
     except Exception as error:
         raise HTTPException(
             status_code=400,
-            detail=f"No se pudo leer el PDF: {error}",
+            detail=f"No se pudo editar el PDF: {error}",
         ) from error
-    finally:
-        file.file.close()
 
-    return Response(content=output.getvalue(), media_type="image/jpeg")
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{clean_output_name(output_name)}"',
+        },
+    )
+
+
+@app.delete("/api/documents/{document_id}", status_code=204)
+def delete_document(document_id: str):
+    if DOCUMENT_ID_PATTERN.fullmatch(document_id):
+        (DOCUMENTS_DIR / f"{document_id}.pdf").unlink(missing_ok=True)
+    return Response(status_code=204)
 
 
 @app.post("/api/edit-pages")
@@ -263,39 +357,7 @@ def edit_pages(
         raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
 
     try:
-        layout = json.loads(pages)
-        if not isinstance(layout, list) or not layout:
-            raise ValueError
-        layout = [(int(item["page"]), int(item.get("rotation", 0))) for item in layout]
-    except (ValueError, TypeError, KeyError) as error:
-        file.file.close()
-        raise HTTPException(
-            status_code=400,
-            detail="La lista de páginas no es válida.",
-        ) from error
-
-    try:
-        reader = PdfReader(file.file)
-        page_count = len(reader.pages)
-        writer = PdfWriter()
-        for page_number, rotation in layout:
-            if page_number < 1 or page_number > page_count:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Las páginas deben estar entre 1 y {page_count}.",
-                )
-            if rotation % 90 != 0:
-                raise HTTPException(
-                    status_code=400,
-                    detail="La rotación debe ser múltiplo de 90 grados.",
-                )
-            page = writer.add_page(reader.pages[page_number - 1])
-            if rotation % 360:
-                page.rotate(rotation % 360)
-
-        output = BytesIO()
-        writer.write(output)
-        writer.close()
+        content = build_edited_pdf(PdfReader(file.file), pages)
     except HTTPException:
         raise
     except Exception as error:
@@ -307,7 +369,7 @@ def edit_pages(
         file.file.close()
 
     return Response(
-        content=output.getvalue(),
+        content=content,
         media_type="application/pdf",
         headers={
             "Content-Disposition": f'attachment; filename="{clean_output_name(output_name)}"',

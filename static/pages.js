@@ -14,13 +14,18 @@ const pagePreviewTitle = document.querySelector("#page-preview-title");
 const pagePreviewPosition = document.querySelector("#page-preview-position");
 const pagePreviewImage = document.querySelector("#page-preview-image");
 
+const THUMBNAIL_WIDTH = 300;
+const PREVIEW_WIDTH = 1400;
+
+// The PDF is uploaded once; thumbnails, previews and the final save use its id.
 let selectedFile = null;
-let thumbnails = [];
+let documentId = null;
+let documentPages = 0;
+let reuploading = null;
 let pages = [];
 let drag = null;
 let suppressClick = false;
 let previewIndex = null;
-let previewUrls = new Map();
 
 pagesFileInput.addEventListener("change", () => {
     if (pagesFileInput.files[0]) loadFile(pagesFileInput.files[0]);
@@ -54,23 +59,23 @@ pagesReset.addEventListener("click", () => {
 
 async function loadFile(file) {
     selectedFile = file;
-    previewUrls.forEach((url) => URL.revokeObjectURL(url));
-    previewUrls = new Map();
+    discardDocument();
     pagesFileName.textContent = file.name;
     pagesOutputName.value = file.name.replace(/\.pdf$/i, "") + "-edited.pdf";
-    thumbnails = [];
+    documentPages = 0;
     pages = [];
     renderPages();
-    setStatus("Generando vistas previas...", false);
+    setStatus("Subiendo el documento...", false);
 
     try {
-        const formData = new FormData();
-        formData.append("file", file, file.name);
-        const response = await fetch("/api/pdf-thumbnails", { method: "POST", body: formData });
-        if (!response.ok) throw new Error((await response.json()).detail || "No se pudo leer el PDF.");
-        if (selectedFile !== file) return;
+        const uploaded = await uploadDocument(file);
+        if (selectedFile !== file) {
+            deleteDocument(uploaded.id);
+            return;
+        }
 
-        thumbnails = (await response.json()).thumbnails;
+        documentId = uploaded.id;
+        documentPages = uploaded.pages;
         resetPages();
         renderPages();
         setStatus("", false);
@@ -81,18 +86,58 @@ async function loadFile(file) {
     }
 }
 
+async function uploadDocument(file) {
+    const formData = new FormData();
+    formData.append("file", file, file.name);
+    const response = await fetch("/api/documents", { method: "POST", body: formData });
+    if (!response.ok) throw new Error((await response.json()).detail || "No se pudo leer el PDF.");
+    return response.json();
+}
+
+// The server forgets documents after an hour without use (or on restart);
+// upload the same file again so the user can keep working.
+function reuploadDocument() {
+    if (!reuploading) {
+        const file = selectedFile;
+        reuploading = uploadDocument(file).then((uploaded) => {
+            if (selectedFile === file) documentId = uploaded.id;
+        }).finally(() => { reuploading = null; });
+    }
+    return reuploading;
+}
+
+function deleteDocument(id) {
+    fetch(`/api/documents/${id}`, { method: "DELETE", keepalive: true }).catch(() => {});
+}
+
+function discardDocument() {
+    if (documentId) deleteDocument(documentId);
+    documentId = null;
+}
+
+window.addEventListener("pagehide", discardDocument);
+window.addEventListener("pageshow", async (event) => {
+    if (!event.persisted || !selectedFile) return;
+    await reuploadDocument();
+    renderPages();
+});
+
+function pageImageUrl(page, width) {
+    return `/api/documents/${documentId}/pages/${page}?width=${width}`;
+}
+
 function resetPages() {
-    pages = thumbnails.map((_, index) => ({ page: index + 1, rotation: 0 }));
+    pages = Array.from({ length: documentPages }, (_, index) => ({ page: index + 1, rotation: 0 }));
 }
 
 function renderPages() {
     pageGrid.innerHTML = "";
     pagesEmpty.hidden = pages.length > 0;
-    pagesEmpty.textContent = selectedFile && thumbnails.length > 0
+    pagesEmpty.textContent = selectedFile && documentPages > 0
         ? "Has eliminado todas las páginas. Pulsa Restablecer para recuperarlas."
         : "Selecciona un PDF para ver sus páginas.";
-    pagesToolbar.hidden = thumbnails.length === 0;
-    const removed = thumbnails.length - pages.length;
+    pagesToolbar.hidden = documentPages === 0;
+    const removed = documentPages - pages.length;
     pageCount.textContent = `${pages.length} ${pages.length === 1 ? "página" : "páginas"}`
         + (removed > 0 ? ` · ${removed} eliminada${removed === 1 ? "" : "s"}` : "");
 
@@ -102,7 +147,7 @@ function renderPages() {
         item.dataset.index = index;
         item.innerHTML = `
             <button class="page-thumb" type="button" aria-label="Ampliar página ${page.page}">
-                <img src="${thumbnails[page.page - 1]}" alt="Página ${page.page}" style="transform: rotate(${page.rotation}deg)">
+                <img src="${pageImageUrl(page.page, THUMBNAIL_WIDTH)}" alt="Página ${page.page}" loading="lazy" style="transform: rotate(${page.rotation}deg)">
             </button>
             <div class="page-meta">
                 <span class="file-number">${String(index + 1).padStart(2, "0")}</span>
@@ -117,6 +162,13 @@ function renderPages() {
             </div>
         `;
 
+        item.querySelector(".page-thumb img").addEventListener("error", async (event) => {
+            const failedId = documentId;
+            const check = await fetch(event.target.src);
+            if (check.status !== 410 || documentId !== failedId) return;
+            await reuploadDocument();
+            renderPages();
+        }, { once: true });
         item.addEventListener("pointerdown", (event) => startDrag(event, item));
         item.querySelector(".page-thumb").addEventListener("click", () => {
             if (!suppressClick) openPreview(index);
@@ -278,7 +330,7 @@ function openPreview(index) {
     if (!pagePreview.open) pagePreview.showModal();
 }
 
-async function renderPreview() {
+function renderPreview() {
     const page = pages[previewIndex];
     pagePreviewTitle.textContent = `Página ${page.page}`;
     pagePreviewPosition.textContent = `POSICIÓN ${previewIndex + 1} DE ${pages.length}`;
@@ -288,27 +340,15 @@ async function renderPreview() {
     pagePreview.querySelector('[data-preview="prev"]').disabled = previewIndex === 0;
     pagePreview.querySelector('[data-preview="next"]').disabled = previewIndex === pages.length - 1;
 
-    // Show the thumbnail straight away and swap in the sharp render once it arrives.
-    pagePreviewImage.src = previewUrls.get(page.page) || thumbnails[page.page - 1];
-    if (previewUrls.has(page.page)) return;
-
-    try {
-        const file = selectedFile;
-        const formData = new FormData();
-        formData.append("file", file, file.name);
-        formData.append("page", page.page);
-        const response = await fetch("/api/pdf-page-preview", { method: "POST", body: formData });
-        if (!response.ok) throw new Error((await response.json()).detail || "No se pudo cargar la vista previa.");
-        const url = URL.createObjectURL(await response.blob());
-        if (selectedFile !== file) {
-            URL.revokeObjectURL(url);
-            return;
-        }
-        previewUrls.set(page.page, url);
-        if (pagePreview.open && pages[previewIndex] === page) pagePreviewImage.src = url;
-    } catch (error) {
-        setStatus(error.message, true);
-    }
+    // Show the (already cached) thumbnail straight away and swap in the sharp
+    // render once the browser has it; both are cached by URL.
+    const previewUrl = pageImageUrl(page.page, PREVIEW_WIDTH);
+    pagePreviewImage.src = pageImageUrl(page.page, THUMBNAIL_WIDTH);
+    const sharp = new Image();
+    sharp.addEventListener("load", () => {
+        if (pagePreview.open && pages[previewIndex] === page) pagePreviewImage.src = previewUrl;
+    });
+    sharp.src = previewUrl;
 }
 
 pagePreview.querySelector('[data-preview="prev"]').addEventListener("click", () => {
@@ -336,7 +376,7 @@ pagePreview.addEventListener("keydown", (event) => {
 
 pagesForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (!selectedFile || thumbnails.length === 0) {
+    if (!selectedFile || !documentId) {
         setStatus("Selecciona un PDF.", true);
         return;
     }
@@ -353,7 +393,6 @@ pagesForm.addEventListener("submit", async (event) => {
     }
 
     const formData = new FormData();
-    formData.append("file", selectedFile, selectedFile.name);
     formData.append("pages", JSON.stringify(pages.map((page) => ({
         page: page.page,
         rotation: ((page.rotation % 360) + 360) % 360,
@@ -362,7 +401,12 @@ pagesForm.addEventListener("submit", async (event) => {
     setStatus("Guardando cambios...", false);
 
     try {
-        const response = await fetch("/api/edit-pages", { method: "POST", body: formData });
+        const save = () => fetch(`/api/documents/${documentId}/edit`, { method: "POST", body: formData });
+        let response = await save();
+        if (response.status === 410) {
+            await reuploadDocument();
+            response = await save();
+        }
         if (!response.ok) throw new Error((await response.json()).detail || "No se pudo crear el PDF.");
 
         downloadBlob(await response.blob(), name.toLowerCase().endsWith(".pdf") ? name : `${name}.pdf`);

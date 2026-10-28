@@ -136,9 +136,15 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 | `POST` | `/api/split` | Extrae un rango mediante `start_page` y `end_page`. |
 | `POST` | `/api/images-to-pdf` | Convierte las imágenes recibidas como `images`. |
 | `POST` | `/api/word-to-pdf` | Convierte un archivo `.doc` o `.docx`. |
-| `POST` | `/api/pdf-thumbnails` | Devuelve una miniatura JPEG (data URL) por página. |
-| `POST` | `/api/pdf-page-preview` | Devuelve la página `page` como imagen JPEG en alta resolución. |
+| `POST` | `/api/documents` | Sube un PDF una sola vez y devuelve su `id` y número de páginas. |
+| `GET` | `/api/documents/{id}/pages/{n}` | Devuelve la página `n` como JPEG; `width` controla el tamaño (100-2000 px). |
+| `POST` | `/api/documents/{id}/edit` | Genera el PDF editado a partir de `pages` sin volver a subir el archivo. |
+| `DELETE` | `/api/documents/{id}` | Elimina el documento subido. |
 | `POST` | `/api/edit-pages` | Genera un PDF a partir de `pages`, una lista JSON como `[{"page": 3, "rotation": 90}]`; las páginas omitidas se eliminan. |
+
+Los documentos subidos a `/api/documents` se guardan en una carpeta temporal
+del contenedor y se eliminan tras una hora sin uso, al cerrar la página o al
+recrear el contenedor (por ejemplo, con `docker compose down`).
 
 Los endpoints que generan archivos aceptan el campo opcional `output_name`
 para indicar el nombre de la descarga. Las peticiones de archivos usan
