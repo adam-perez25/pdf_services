@@ -94,8 +94,11 @@ def clean_output_name(output_name: str) -> str:
     return name
 
 
+# The file-processing endpoints are plain functions, not async: FastAPI runs
+# them in a worker thread, so a long merge or conversion does not freeze the
+# server for everyone else.
 @app.post("/api/merge")
-async def merge_pdfs(
+def merge_pdfs(
     files: list[UploadFile] = File(...),
     output_name: str = Form("merged.pdf"),
 ):
@@ -127,7 +130,7 @@ async def merge_pdfs(
         ) from error
     finally:
         for file in files:
-            await file.close()
+            file.file.close()
 
     filename = clean_output_name(output_name)
     return Response(
@@ -140,7 +143,7 @@ async def merge_pdfs(
 
 
 @app.post("/api/pdf-info")
-async def pdf_info(file: UploadFile = File(...)):
+def pdf_info(file: UploadFile = File(...)):
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
 
@@ -153,11 +156,11 @@ async def pdf_info(file: UploadFile = File(...)):
             detail=f"No se pudo leer el PDF: {error}",
         ) from error
     finally:
-        await file.close()
+        file.file.close()
 
 
 @app.post("/api/split")
-async def split_pdf(
+def split_pdf(
     file: UploadFile = File(...),
     output_name: str = Form("split-pdf"),
     start_page: int = Form(1),
@@ -192,7 +195,7 @@ async def split_pdf(
             detail=f"No se pudo dividir el PDF: {error}",
         ) from error
     finally:
-        await file.close()
+        file.file.close()
 
     return Response(
         content=output.getvalue(),
@@ -205,11 +208,8 @@ async def split_pdf(
 
 # The page organizer uploads a PDF once and then refers to it by id, so
 # thumbnails, previews and the final save never upload the file again.
-# Documents live in a temporary folder and are removed after DOCUMENT_TTL_SECONDS
-# without use (or when the page asks for it).
-#
-# Rendering and rewriting pages is CPU-bound, so these endpoints are plain
-# functions: FastAPI runs them in a worker thread and the server stays responsive.
+# Documents live in a temporary folder and are removed after the download, after
+# DOCUMENT_TTL_SECONDS without use, or when the page asks for it.
 def get_document_path(document_id: str) -> Path:
     if not DOCUMENT_ID_PATTERN.fullmatch(document_id):
         raise HTTPException(status_code=404, detail="Documento no encontrado.")
@@ -430,7 +430,7 @@ def edit_pages(
 
 
 @app.post("/api/images-to-pdf")
-async def images_to_pdf(
+def images_to_pdf(
     images: list[UploadFile] = File(...),
     output_name: str = Form("images.pdf"),
 ):
@@ -468,7 +468,7 @@ async def images_to_pdf(
         for image in converted_images:
             image.close()
         for image_file in images:
-            await image_file.close()
+            image_file.file.close()
 
     return Response(
         content=output.getvalue(),
@@ -480,7 +480,7 @@ async def images_to_pdf(
 
 
 @app.post("/api/word-to-pdf")
-async def word_to_pdf(
+def word_to_pdf(
     file: UploadFile = File(...),
     output_name: str = Form("document.pdf"),
 ):
@@ -499,7 +499,7 @@ async def word_to_pdf(
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary_path = Path(temporary_directory)
             input_path = temporary_path / f"source{file_extension}"
-            input_path.write_bytes(await file.read())
+            input_path.write_bytes(file.file.read())
             profile_path = temporary_path / "profile"
             result = subprocess.run(
                 [
@@ -530,7 +530,7 @@ async def word_to_pdf(
             detail=f"No se pudo convertir el documento: {error}",
         ) from error
     finally:
-        await file.close()
+        file.file.close()
 
     return Response(
         content=output,
