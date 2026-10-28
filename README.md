@@ -1,11 +1,12 @@
 # PDF Toolkit
 
 Aplicación web para trabajar con documentos desde el navegador. Permite unir y
-dividir archivos PDF, convertir imágenes a PDF y transformar documentos Word
-en PDF.
+dividir archivos PDF, organizar sus páginas, convertir imágenes a PDF y
+transformar documentos Word en PDF.
 
 La aplicación está construida con [FastAPI](https://fastapi.tiangolo.com/),
-[pypdf](https://pypi.org/project/pypdf/) y
+[pypdf](https://pypi.org/project/pypdf/),
+[pypdfium2](https://pypi.org/project/pypdfium2/) y
 [Pillow](https://pypi.org/project/Pillow/). La interfaz se sirve desde el
 mismo servidor y no requiere un frontend independiente.
 
@@ -18,6 +19,11 @@ mismo servidor y no requiere un frontend independiente.
   con una página por imagen.
 - **Word a PDF:** convierte archivos `.doc` y `.docx` mediante LibreOffice en
   modo headless.
+- **Organizar páginas:** muestra una vista previa de cada página y permite
+  girarlas, eliminarlas y reordenarlas (con los botones o arrastrándolas, también
+  en pantallas táctiles manteniendo pulsada la página) antes de descargar el PDF
+  resultante.
+  Al pulsar una página se abre una vista ampliada en alta resolución.
 
 Los archivos se procesan durante la solicitud y se devuelven como descargas.
 La aplicación no incluye almacenamiento permanente de documentos.
@@ -130,6 +136,17 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 | `POST` | `/api/split` | Extrae un rango mediante `start_page` y `end_page`. |
 | `POST` | `/api/images-to-pdf` | Convierte las imágenes recibidas como `images`. |
 | `POST` | `/api/word-to-pdf` | Convierte un archivo `.doc` o `.docx`. |
+| `POST` | `/api/documents` | Sube un PDF una sola vez y devuelve su `id` y número de páginas. |
+| `GET` | `/api/documents/{id}/pages/{n}` | Devuelve la página `n` como JPEG; `width` controla el tamaño (100-2000 px). |
+| `POST` | `/api/documents/{id}/edit` | Genera el PDF editado a partir de `pages` sin volver a subir el archivo. |
+| `DELETE` | `/api/documents/{id}` | Elimina el documento subido. |
+| `POST` | `/api/edit-pages` | Genera un PDF a partir de `pages`, una lista JSON como `[{"page": 3, "rotation": 90}]`; las páginas omitidas se eliminan. |
+
+Los documentos subidos a `/api/documents` se guardan en una carpeta temporal
+del contenedor y se eliminan en cuanto se descarga el PDF editado, al cerrar
+la página, tras 30 minutos sin uso (se comprueba cada 5 minutos) y al iniciar
+el servidor. Si se sigue editando después de descargar, la página vuelve a
+subir el archivo automáticamente.
 
 Los endpoints que generan archivos aceptan el campo opcional `output_name`
 para indicar el nombre de la descarga. Las peticiones de archivos usan

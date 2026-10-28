@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Organizar páginas | PDF Toolkit</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <main class="shell service-page">
+        <section class="intro">
+            <p class="eyebrow">SERVICIO 05 / PÁGINAS</p>
+            <h1>Organiza tus páginas<br><em>a tu manera.</em></h1>
+            <p class="lede">Gira, elimina y reordena las páginas de un PDF viendo cada una antes de descargar.</p>
+        </section>
+
+        <nav class="service-back" aria-label="Navegación del servicio">
+            <a class="back-button" href="/">&#8592; Menu</a>
+        </nav>
+
+        <section class="workspace" aria-labelledby="pages-title">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">01 / DOCUMENTO</p>
+                    <h2 id="pages-title">Tus páginas</h2>
+                </div>
+                <span id="page-count" class="counter">0 páginas</span>
+            </div>
+
+            <label class="dropzone" for="pages-file-input" id="pages-dropzone">
+                <span class="drop-icon">+</span>
+                <span><strong>Seleccionar PDF</strong><small id="pages-file-name">o arrástralo aquí</small></span>
+                <input id="pages-file-input" type="file" accept="application/pdf,.pdf">
+            </label>
+
+            <div id="pages-toolbar" class="page-toolbar" hidden>
+                <button class="tool-button" type="button" data-rotate-all="-90">&#8634; Girar todas</button>
+                <button class="tool-button" type="button" data-rotate-all="90">&#8635; Girar todas</button>
+                <button class="tool-button" type="button" id="pages-reset">Restablecer</button>
+            </div>
+
+            <div id="pages-empty" class="empty-state">Selecciona un PDF para ver sus páginas.</div>
+            <ol id="page-grid" class="page-grid" aria-live="polite"></ol>
+
+            <div class="section-heading output-heading">
+                <div>
+                    <p class="eyebrow">02 / EXPORTAR</p>
+                    <h2>Nombre del resultado</h2>
+                </div>
+            </div>
+
+            <form id="pages-form">
+                <label class="name-field">
+                    <span>Nombre del PDF</span>
+                    <input id="pages-output-name" type="text" value="edited.pdf" maxlength="120" autocomplete="off">
+                </label>
+                <button class="primary-button" type="submit">
+                    <span>Guardar y descargar</span>
+                    <span aria-hidden="true">&#8594;</span>
+                </button>
+            </form>
+            <p id="pages-status" class="status" role="status"></p>
+        </section>
+    </main>
+
+    <dialog id="page-preview" class="page-preview" aria-labelledby="page-preview-title">
+        <div class="preview-header">
+            <div>
+                <p class="eyebrow" id="page-preview-position"></p>
+                <h2 id="page-preview-title"></h2>
+            </div>
+            <button class="tool-button" type="button" id="page-preview-close" aria-label="Cerrar vista previa">&times; Cerrar</button>
+        </div>
+        <div class="preview-stage">
+            <img id="page-preview-image" alt="">
+        </div>
+        <div class="preview-actions">
+            <button class="tool-button" type="button" data-preview="prev" aria-label="Página anterior">&#8592; Anterior</button>
+            <button class="tool-button" type="button" data-preview="ccw" aria-label="Girar a la izquierda">&#8634;</button>
+            <button class="tool-button" type="button" data-preview="cw" aria-label="Girar a la derecha">&#8635;</button>
+            <button class="tool-button" type="button" data-preview="next" aria-label="Página siguiente">Siguiente &#8594;</button>
+        </div>
+    </dialog>
+    <script src="/static/pages.js"></script>
+</body>
+</html>

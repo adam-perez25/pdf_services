@@ -70,6 +70,33 @@ h2 { margin: 0; font-size: 24px; line-height: 1.1; }
 .image-item { display: grid; grid-template-columns: 38px 58px minmax(0, 1fr) 32px 32px 32px; align-items: center; gap: 8px; min-height: 68px; padding: 6px 10px; border: 1px solid var(--line); background: var(--white); cursor: grab; }
 .image-item.is-dragging { opacity: .45; border-color: var(--accent); }
 .image-preview { width: 48px; height: 52px; object-fit: cover; border: 1px solid var(--line); background: var(--paper); }
+.page-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.page-toolbar[hidden] { display: none; }
+.tool-button { min-height: 34px; padding: 7px 11px; border: 1px solid var(--line); color: var(--ink); background: var(--white); font: 500 11px "DM Mono", monospace; cursor: pointer; transition: border-color .2s, color .2s; }
+.tool-button:hover { border-color: var(--accent); color: var(--accent-dark); }
+.page-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.page-card { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); background: var(--white); cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.page-card.is-placeholder { border: 1px dashed var(--accent); background: #fff5ee; }
+.page-card.is-placeholder > * { visibility: hidden; }
+.page-ghost { position: fixed; top: 0; left: 0; z-index: 10; margin: 0; list-style: none; pointer-events: none; border-color: var(--accent); box-shadow: 0 18px 40px rgba(23, 33, 31, .25); opacity: .95; }
+body.is-reordering, body.is-reordering * { cursor: grabbing !important; }
+.page-thumb { display: grid; place-items: center; width: 100%; aspect-ratio: 1; padding: 0; overflow: hidden; border: 1px solid transparent; background: var(--paper); cursor: zoom-in; transition: border-color .2s; }
+.page-thumb.is-unavailable img { display: none; }
+.page-thumb.is-unavailable::after { content: attr(data-label); color: var(--muted); font: 500 12px "DM Mono", monospace; }
+.page-thumb:hover, .page-thumb:focus-visible { border-color: var(--accent); outline: none; }
+.page-preview { --stage-width: min(88vw, 1000px); --stage-height: calc(100vh - 210px); width: calc(var(--stage-width) + 48px); max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); padding: 20px 24px; border: 1px solid var(--line); color: var(--ink); background: var(--white); box-shadow: 0 24px 70px rgba(23, 33, 31, .25); }
+.page-preview::backdrop { background: rgba(23, 33, 31, .6); }
+.preview-header { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.preview-stage { display: grid; place-items: center; height: var(--stage-height); margin: 16px 0; overflow: hidden; background: var(--paper); }
+.preview-stage img { max-width: var(--stage-width); max-height: var(--stage-height); box-shadow: 0 4px 16px rgba(23, 33, 31, .2); transition: transform .2s; }
+.preview-stage img.is-sideways { max-width: var(--stage-height); max-height: var(--stage-width); }
+.preview-actions { display: flex; justify-content: center; gap: 8px; }
+.preview-actions .tool-button:disabled { opacity: .4; cursor: default; }
+.page-thumb img { max-width: 72%; max-height: 72%; box-shadow: 0 2px 8px rgba(23, 33, 31, .18); transition: transform .2s; pointer-events: none; }
+.page-meta { display: flex; align-items: baseline; justify-content: space-between; }
+.page-meta small { color: var(--muted); font: 500 11px "DM Mono", monospace; }
+.page-actions { display: grid; grid-template-columns: repeat(5, 1fr); }
+.page-actions button { min-height: 28px; padding: 0; }
 .file-number { color: var(--accent); font: 500 12px "DM Mono", monospace; }
 .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .move-button, .remove-button { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 18px; }
@@ -94,4 +121,6 @@ h2 { margin: 0; font-size: 24px; line-height: 1.1; }
     .file-item { grid-template-columns: 30px minmax(0, 1fr) 28px 28px 28px; gap: 3px; }
     .image-item { grid-template-columns: 30px 44px minmax(0, 1fr) 28px 28px 28px; gap: 3px; }
     .image-preview { width: 38px; height: 44px; }
+    .page-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .page-card { padding: 6px; }
 }
