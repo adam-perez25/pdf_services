@@ -81,6 +81,8 @@ h2 { margin: 0; font-size: 24px; line-height: 1.1; }
 .page-ghost { position: fixed; top: 0; left: 0; z-index: 10; margin: 0; list-style: none; pointer-events: none; border-color: var(--accent); box-shadow: 0 18px 40px rgba(23, 33, 31, .25); opacity: .95; }
 body.is-reordering, body.is-reordering * { cursor: grabbing !important; }
 .page-thumb { display: grid; place-items: center; width: 100%; aspect-ratio: 1; padding: 0; overflow: hidden; border: 1px solid transparent; background: var(--paper); cursor: zoom-in; transition: border-color .2s; }
+.page-thumb.is-unavailable img { display: none; }
+.page-thumb.is-unavailable::after { content: attr(data-label); color: var(--muted); font: 500 12px "DM Mono", monospace; }
 .page-thumb:hover, .page-thumb:focus-visible { border-color: var(--accent); outline: none; }
 .page-preview { --stage-width: min(88vw, 1000px); --stage-height: calc(100vh - 210px); width: calc(var(--stage-width) + 48px); max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); padding: 20px 24px; border: 1px solid var(--line); color: var(--ink); background: var(--white); box-shadow: 0 24px 70px rgba(23, 33, 31, .25); }
 .page-preview::backdrop { background: rgba(23, 33, 31, .6); }

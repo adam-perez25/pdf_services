@@ -143,8 +143,10 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 | `POST` | `/api/edit-pages` | Genera un PDF a partir de `pages`, una lista JSON como `[{"page": 3, "rotation": 90}]`; las páginas omitidas se eliminan. |
 
 Los documentos subidos a `/api/documents` se guardan en una carpeta temporal
-del contenedor y se eliminan tras una hora sin uso, al cerrar la página o al
-recrear el contenedor (por ejemplo, con `docker compose down`).
+del contenedor y se eliminan en cuanto se descarga el PDF editado, al cerrar
+la página, tras 30 minutos sin uso (se comprueba cada 5 minutos) y al iniciar
+el servidor. Si se sigue editando después de descargar, la página vuelve a
+subir el archivo automáticamente.
 
 Los endpoints que generan archivos aceptan el campo opcional `output_name`
 para indicar el nombre de la descarga. Las peticiones de archivos usan

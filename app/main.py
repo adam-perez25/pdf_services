@@ -1,5 +1,7 @@
 from io import BytesIO
 import json
+import logging
+import os
 from pathlib import Path
 import re
 import shutil
@@ -20,14 +22,26 @@ from pypdf import PdfReader, PdfWriter
 BASE_DIR = Path(__file__).resolve().parent.parent
 DOCUMENTS_DIR = Path(tempfile.gettempdir()) / "pdf-toolkit-documents"
 DOCUMENTS_DIR.mkdir(exist_ok=True)
-DOCUMENT_TTL_SECONDS = 60 * 60
+DOCUMENT_TTL_SECONDS = 30 * 60
+DOCUMENT_SWEEP_SECONDS = 5 * 60
 DOCUMENT_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
 PDFIUM_LOCK = threading.Lock()
 THUMBNAIL_WIDTH = 300
 MIN_RENDER_WIDTH = 100
 MAX_RENDER_WIDTH = 2000
+logger = logging.getLogger("uvicorn.error")
 app = FastAPI(title="Unir PDF")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+
+
+@app.middleware("http")
+async def revalidate_static_files(request, call_next):
+    # Make browsers check for a newer CSS/JS after the image is rebuilt instead
+    # of reusing a stale copy; unchanged files are answered with a cheap 304.
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -200,24 +214,56 @@ def get_document_path(document_id: str) -> Path:
     if not DOCUMENT_ID_PATTERN.fullmatch(document_id):
         raise HTTPException(status_code=404, detail="Documento no encontrado.")
     path = DOCUMENTS_DIR / f"{document_id}.pdf"
-    if not path.exists():
-        # 410 tells the page the upload expired, so it can send the file again.
-        raise HTTPException(
-            status_code=410,
-            detail="El documento ha caducado. Vuelve a seleccionar el PDF.",
-        )
-    path.touch()
+    try:
+        # Refresh the last-use time; unlike Path.touch this never recreates a
+        # file that another request has just deleted.
+        os.utime(path)
+    except FileNotFoundError:
+        raise document_gone() from None
     return path
 
 
-def remove_expired_documents() -> None:
-    limit = time.time() - DOCUMENT_TTL_SECONDS
-    for path in DOCUMENTS_DIR.glob("*.pdf"):
+def document_gone() -> HTTPException:
+    # 410 tells the page the upload expired, so it can send the file again.
+    return HTTPException(
+        status_code=410,
+        detail="El documento ha caducado. Vuelve a seleccionar el PDF.",
+    )
+
+
+def open_pdfium_document(path: Path) -> pypdfium2.PdfDocument:
+    try:
+        return pypdfium2.PdfDocument(path)
+    except Exception:
+        if not path.exists():
+            raise document_gone() from None
+        raise
+
+
+def remove_expired_documents(max_age: float = DOCUMENT_TTL_SECONDS) -> None:
+    limit = time.time() - max_age
+    for path in DOCUMENTS_DIR.iterdir():
         try:
             if path.stat().st_mtime < limit:
                 path.unlink()
         except FileNotFoundError:
             pass
+
+
+def sweep_documents_forever() -> None:
+    while True:
+        time.sleep(DOCUMENT_SWEEP_SECONDS)
+        try:
+            remove_expired_documents()
+        except Exception:
+            logger.exception("No se pudieron limpiar los documentos temporales.")
+
+
+@app.on_event("startup")
+def start_document_sweeper() -> None:
+    # Anything left from a previous run (crash, `docker restart`) is stale.
+    remove_expired_documents(max_age=0)
+    threading.Thread(target=sweep_documents_forever, daemon=True).start()
 
 
 def build_edited_pdf(reader: PdfReader, pages: str) -> bytes:
@@ -267,7 +313,7 @@ def upload_document(file: UploadFile = File(...)):
         with path.open("wb") as destination:
             shutil.copyfileobj(file.file, destination)
         with PDFIUM_LOCK:
-            document = pypdfium2.PdfDocument(path)
+            document = open_pdfium_document(path)
             page_count = len(document)
             document.close()
     except Exception as error:
@@ -289,7 +335,7 @@ def document_page_image(document_id: str, page: int, width: int = THUMBNAIL_WIDT
 
     # pdfium is not thread-safe, so renders run one at a time.
     with PDFIUM_LOCK:
-        document = pypdfium2.PdfDocument(path)
+        document = open_pdfium_document(path)
         try:
             if page < 1 or page > len(document):
                 raise HTTPException(
@@ -323,6 +369,8 @@ def edit_document(
     path = get_document_path(document_id)
     try:
         content = build_edited_pdf(PdfReader(path), pages)
+    except FileNotFoundError:
+        raise document_gone() from None
     except HTTPException:
         raise
     except Exception as error:
@@ -330,6 +378,10 @@ def edit_document(
             status_code=400,
             detail=f"No se pudo editar el PDF: {error}",
         ) from error
+
+    # The result is about to be downloaded, so the uploaded copy is no longer
+    # needed. If the user keeps editing, the page uploads the file again.
+    path.unlink(missing_ok=True)
 
     return Response(
         content=content,

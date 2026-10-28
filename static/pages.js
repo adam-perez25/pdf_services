@@ -21,6 +21,7 @@ const PREVIEW_WIDTH = 1400;
 let selectedFile = null;
 let documentId = null;
 let documentPages = 0;
+let documentExpired = false;
 let reuploading = null;
 let pages = [];
 let drag = null;
@@ -60,6 +61,7 @@ pagesReset.addEventListener("click", () => {
 async function loadFile(file) {
     selectedFile = file;
     discardDocument();
+    documentExpired = false;
     pagesFileName.textContent = file.name;
     pagesOutputName.value = file.name.replace(/\.pdf$/i, "") + "-edited.pdf";
     documentPages = 0;
@@ -94,16 +96,31 @@ async function uploadDocument(file) {
     return response.json();
 }
 
-// The server forgets documents after an hour without use (or on restart);
-// upload the same file again so the user can keep working.
+// The server deletes its copy after each download, after 30 minutes without
+// use and on restart. The file is only sent again when the user actually keeps
+// editing, never just because a thumbnail scrolled into view, so a finished
+// document does not linger on the server.
 function reuploadDocument() {
     if (!reuploading) {
         const file = selectedFile;
         reuploading = uploadDocument(file).then((uploaded) => {
-            if (selectedFile === file) documentId = uploaded.id;
+            if (selectedFile !== file) {
+                deleteDocument(uploaded.id);
+                return;
+            }
+            documentId = uploaded.id;
+            documentExpired = false;
         }).finally(() => { reuploading = null; });
     }
     return reuploading;
+}
+
+function reuploadIfExpired() {
+    if (!documentExpired || !selectedFile || reuploading) return;
+    reuploadDocument().then(() => {
+        renderPages();
+        if (pagePreview.open) renderPreview();
+    }).catch((error) => setStatus(error.message, true));
 }
 
 function deleteDocument(id) {
@@ -118,8 +135,8 @@ function discardDocument() {
 window.addEventListener("pagehide", discardDocument);
 window.addEventListener("pageshow", async (event) => {
     if (!event.persisted || !selectedFile) return;
-    await reuploadDocument();
-    renderPages();
+    documentExpired = true;
+    reuploadIfExpired();
 });
 
 function pageImageUrl(page, width) {
@@ -146,7 +163,7 @@ function renderPages() {
         item.className = "page-card";
         item.dataset.index = index;
         item.innerHTML = `
-            <button class="page-thumb" type="button" aria-label="Ampliar página ${page.page}">
+            <button class="page-thumb" type="button" aria-label="Ampliar página ${page.page}" data-label="pág. ${page.page}">
                 <img src="${pageImageUrl(page.page, THUMBNAIL_WIDTH)}" alt="Página ${page.page}" loading="lazy" style="transform: rotate(${page.rotation}deg)">
             </button>
             <div class="page-meta">
@@ -163,11 +180,11 @@ function renderPages() {
         `;
 
         item.querySelector(".page-thumb img").addEventListener("error", async (event) => {
+            const thumb = event.target.parentElement;
+            thumb.classList.add("is-unavailable");
             const failedId = documentId;
             const check = await fetch(event.target.src);
-            if (check.status !== 410 || documentId !== failedId) return;
-            await reuploadDocument();
-            renderPages();
+            if (check.status === 410 && documentId === failedId) documentExpired = true;
         }, { once: true });
         item.addEventListener("pointerdown", (event) => startDrag(event, item));
         item.querySelector(".page-thumb").addEventListener("click", () => {
@@ -183,6 +200,10 @@ function renderPages() {
         });
         pageGrid.appendChild(item);
     });
+
+    // Every edit re-renders the grid, so this is where an expired document
+    // comes back once the user continues working.
+    reuploadIfExpired();
 }
 
 function movePage(fromIndex, toIndex) {
@@ -348,7 +369,15 @@ function renderPreview() {
     sharp.addEventListener("load", () => {
         if (pagePreview.open && pages[previewIndex] === page) pagePreviewImage.src = previewUrl;
     });
+    sharp.addEventListener("error", async () => {
+        const failedId = documentId;
+        const check = await fetch(previewUrl);
+        if (check.status !== 410 || documentId !== failedId) return;
+        documentExpired = true;
+        reuploadIfExpired();
+    }, { once: true });
     sharp.src = previewUrl;
+    reuploadIfExpired();
 }
 
 pagePreview.querySelector('[data-preview="prev"]').addEventListener("click", () => {
@@ -408,6 +437,8 @@ pagesForm.addEventListener("submit", async (event) => {
             response = await save();
         }
         if (!response.ok) throw new Error((await response.json()).detail || "No se pudo crear el PDF.");
+        // The server deleted its copy as part of the download.
+        documentExpired = true;
 
         downloadBlob(await response.blob(), name.toLowerCase().endsWith(".pdf") ? name : `${name}.pdf`);
         setStatus("PDF creado y descargado.", false);
