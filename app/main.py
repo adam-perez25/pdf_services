@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from io import BytesIO
 import json
 import logging
+import mimetypes
 import os
 from pathlib import Path
 import re
@@ -42,6 +43,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Unir PDF", lifespan=lifespan)
+# The slim image's MIME table has no entry for .woff2, so the bundled fonts
+# would otherwise be served as text/plain.
+mimetypes.add_type("font/woff2", ".woff2")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 

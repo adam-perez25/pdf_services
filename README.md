@@ -203,6 +203,7 @@ LibreOffice o Ghostscript no están instalados. Las pruebas no forman parte de l
 app/
   main.py             # Aplicación FastAPI y endpoints
 static/               # JavaScript y estilos de la interfaz
+  fonts/              # Fuentes Manrope y DM Mono incluidas (licencia OFL)
 templates/            # Páginas HTML
 Dockerfile            # Imagen de producción
 docker-compose.yml    # Servicio para Docker Compose
@@ -219,3 +220,7 @@ autenticación, límites de tamaño y frecuencia de subida, HTTPS y una polític
 de gestión de errores y registros. Los documentos subidos pueden contener
 información sensible: utiliza el servicio únicamente en un entorno de
 confianza y revisa la configuración de red del despliegue.
+
+La interfaz no carga recursos externos: las fuentes Manrope y DM Mono se
+sirven desde `static/fonts/`, distribuidas bajo la SIL Open Font License, por
+lo que el navegador no realiza peticiones a servicios de terceros.
