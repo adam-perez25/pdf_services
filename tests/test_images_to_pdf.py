@@ -84,3 +84,28 @@ def test_phone_photo_pdf_can_be_compressed(client):
 
     assert response.status_code == 200
     assert len(response.content) < len(pdf) * 0.8
+
+
+@pytest.mark.parametrize("image_format", ["WEBP", "GIF", "BMP", "TIFF"])
+def test_other_raster_formats_are_accepted(client, image_format):
+    image = BytesIO()
+    Image.new("RGB", (40, 30), "teal").save(image, format=image_format)
+    response = client.post("/api/images-to-pdf", files=[("images", ("imagen", image.getvalue()))])
+
+    assert response.status_code == 200
+    assert len(PdfReader(BytesIO(response.content)).pages) == 1
+
+
+def test_eps_is_rejected_without_running_ghostscript(client, monkeypatch):
+    # Pillow would render an EPS by running Ghostscript on the upload.
+    from PIL import EpsImagePlugin
+
+    def fail(*args, **kwargs):
+        raise AssertionError("Ghostscript must not run")
+
+    monkeypatch.setattr(EpsImagePlugin, "Ghostscript", fail)
+    eps = b"%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 50 50\nnewpath 0 0 moveto 50 0 lineto 50 50 lineto closepath fill\nshowpage\n"
+    response = client.post("/api/images-to-pdf", files=[("images", ("dibujo.png", eps, "image/png"))])
+
+    assert response.status_code == 400
+    assert "no es una imagen válida" in response.json()["detail"]
