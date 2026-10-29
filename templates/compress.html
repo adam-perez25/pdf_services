@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Comprimir PDF | PDF Toolkit</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <main class="shell service-page">
+        <section class="intro">
+            <p class="eyebrow">SERVICIO 06 / COMPRIMIR</p>
+            <h1>Reduce el tamaño<br><em>de tus PDFs.</em></h1>
+            <p class="lede">Ideal para documentos escaneados: baja la resolución de las imágenes y descarga un PDF más ligero.</p>
+        </section>
+
+        <nav class="service-back" aria-label="Navegación del servicio">
+            <a class="back-button" href="/">&#8592; Menu</a>
+        </nav>
+
+        <section class="workspace" aria-labelledby="compress-title">
+            <div class="view-heading">
+                <h2 id="compress-title">Documento PDF</h2>
+                <p class="view-lede">La compresión se hace con Ghostscript. Si el resultado no es más pequeño, se descarga el original.</p>
+            </div>
+
+            <form id="compress-form">
+                <label class="dropzone" for="compress-input" id="compress-dropzone">
+                    <span class="drop-icon">+</span>
+                    <span><strong>Seleccionar PDF</strong><small id="compress-file-name">o arrástralo aquí</small></span>
+                    <input id="compress-input" type="file" accept="application/pdf,.pdf">
+                </label>
+
+                <label class="name-field">
+                    <span>Nivel de compresión</span>
+                    <select id="compress-level">
+                        <option value="strong">Máxima: archivo más pequeño (imágenes a 72 ppp)</option>
+                        <option value="recommended" selected>Recomendada: buena para leer en pantalla (150 ppp)</option>
+                        <option value="high">Alta calidad: buena para imprimir (300 ppp)</option>
+                    </select>
+                </label>
+
+                <label class="name-field">
+                    <span>Nombre del PDF</span>
+                    <input id="compress-output-name" type="text" value="compressed.pdf" maxlength="120" autocomplete="off">
+                </label>
+                <button class="primary-button" type="submit">
+                    <span>Comprimir y descargar</span>
+                    <span aria-hidden="true">&#8594;</span>
+                </button>
+            </form>
+            <p id="compress-status" class="status" role="status"></p>
+        </section>
+    </main>
+    <script src="/static/compress.js"></script>
+</body>
+</html>

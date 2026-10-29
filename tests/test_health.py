@@ -9,6 +9,7 @@ def test_health_reports_ok(client):
     assert body["status"] == "ok"
     assert body["storage"] is True
     assert isinstance(body["libreoffice"], bool)
+    assert isinstance(body["ghostscript"], bool)
 
 
 def test_health_leaves_no_files(client, documents_dir):
@@ -36,3 +37,12 @@ def test_health_reports_missing_libreoffice(client, monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["libreoffice"] is False
+
+
+def test_health_reports_missing_ghostscript(client, monkeypatch):
+    monkeypatch.setattr(main, "find_ghostscript", lambda: None)
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json()["ghostscript"] is False

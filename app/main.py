@@ -85,10 +85,16 @@ async def pages_page():
     return render_page("pages.html")
 
 
+@app.get("/compress", response_class=HTMLResponse)
+async def compress_page():
+    return render_page("compress.html")
+
+
 @app.get("/health")
 def health():
     # Used by the Docker HEALTHCHECK. The service is unhealthy only if it cannot
-    # store uploads; a missing LibreOffice is reported but only disables Word.
+    # store uploads; a missing LibreOffice or Ghostscript is reported but only
+    # disables Word to PDF or Compress PDF.
     try:
         DOCUMENTS_DIR.mkdir(exist_ok=True)
         with tempfile.NamedTemporaryFile(dir=DOCUMENTS_DIR, prefix=".health-"):
@@ -103,12 +109,17 @@ def health():
             "status": "ok" if storage_ok else "error",
             "storage": storage_ok,
             "libreoffice": find_soffice() is not None,
+            "ghostscript": find_ghostscript() is not None,
         },
     )
 
 
 def find_soffice() -> str | None:
     return shutil.which("soffice") or shutil.which("soffice.exe")
+
+
+def find_ghostscript() -> str | None:
+    return shutil.which("gs") or shutil.which("gswin64c") or shutil.which("gswin32c")
 
 
 def render_page(template_name: str) -> HTMLResponse:
@@ -695,3 +706,106 @@ def word_to_pdf(
         },
     )
 
+
+
+# Ghostscript presets: image resolution is what shrinks scanned documents.
+COMPRESSION_LEVELS = {
+    "strong": "/screen",  # 72 dpi images, smallest file
+    "recommended": "/ebook",  # 150 dpi images, good for reading on screen
+    "high": "/printer",  # 300 dpi images, good for printing
+}
+COMPRESSION_TIMEOUT_SECONDS = 600
+
+
+@app.post("/api/compress")
+def compress_pdf(
+    file: UploadFile = File(...),
+    level: str = Form("recommended"),
+    output_name: str = Form("compressed.pdf"),
+):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+    if level not in COMPRESSION_LEVELS:
+        raise HTTPException(status_code=400, detail="El nivel de compresión no es válido.")
+
+    ghostscript = find_ghostscript()
+    if not ghostscript:
+        file.file.close()
+        raise HTTPException(
+            status_code=503,
+            detail="Ghostscript no está instalado o no está disponible en el PATH.",
+        )
+
+    # Both files live in the documents folder, so the regular sweep removes
+    # them if the server stops halfway; normally they are deleted once sent.
+    DOCUMENTS_DIR.mkdir(exist_ok=True)
+    job_id = uuid.uuid4().hex
+    input_path = DOCUMENTS_DIR / f"{job_id}.in.pdf"
+    output_path = DOCUMENTS_DIR / f"{job_id}.out.pdf"
+
+    def remove_job_files():
+        input_path.unlink(missing_ok=True)
+        output_path.unlink(missing_ok=True)
+
+    try:
+        with input_path.open("wb") as destination:
+            shutil.copyfileobj(file.file, destination)
+        # Ghostscript "repairs" almost anything without failing, so make sure
+        # this really is a readable PDF first.
+        with PDFIUM_LOCK:
+            pypdfium2.PdfDocument(input_path).close()
+        result = subprocess.run(
+            [
+                ghostscript,
+                "-dSAFER",
+                "-dBATCH",
+                "-dNOPAUSE",
+                "-dQUIET",
+                "-sDEVICE=pdfwrite",
+                "-dCompatibilityLevel=1.5",
+                f"-dPDFSETTINGS={COMPRESSION_LEVELS[level]}",
+                "-dDetectDuplicateImages=true",
+                # Left to choose, Ghostscript sometimes stores grainy scans with
+                # lossless Flate, which can be bigger than the original JPEG.
+                "-dAutoFilterColorImages=false",
+                "-dColorImageFilter=/DCTEncode",
+                "-dAutoFilterGrayImages=false",
+                "-dGrayImageFilter=/DCTEncode",
+                f"-sOutputFile={output_path}",
+                str(input_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=COMPRESSION_TIMEOUT_SECONDS,
+            check=False,
+        )
+        if result.returncode != 0 or not output_path.exists() or output_path.stat().st_size == 0:
+            detail = result.stderr.strip() or result.stdout.strip()
+            raise RuntimeError(detail or "Ghostscript no pudo comprimir el documento.")
+    except subprocess.TimeoutExpired as error:
+        remove_job_files()
+        raise HTTPException(status_code=504, detail="La compresión tardó demasiado.") from error
+    except Exception as error:
+        remove_job_files()
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se pudo comprimir el PDF: {error}",
+        ) from error
+    finally:
+        file.file.close()
+
+    original_size = input_path.stat().st_size
+    compressed_size = output_path.stat().st_size
+    # Already optimized PDFs can come out bigger; then the original is better.
+    compressed = compressed_size < original_size
+    return FileResponse(
+        output_path if compressed else input_path,
+        media_type="application/pdf",
+        filename=clean_output_name(output_name),
+        headers={
+            "X-Original-Size": str(original_size),
+            "X-Compressed-Size": str(compressed_size if compressed else original_size),
+            "X-Compression-Applied": "true" if compressed else "false",
+        },
+        background=BackgroundTask(remove_job_files),
+    )
