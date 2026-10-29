@@ -6,20 +6,12 @@ const pdfImagesFormat = document.querySelector("#pdf-images-format");
 const pdfImagesDpi = document.querySelector("#pdf-images-dpi");
 const pdfImagesBaseName = document.querySelector("#pdf-images-base-name");
 const pdfImagesStatus = document.querySelector("#pdf-images-status");
+const setStatus = statusSetter(pdfImagesStatus);
 
 let selectedFile = null;
 
 pdfImagesInput.addEventListener("change", () => setPdfImagesFile(pdfImagesInput.files[0] || null));
-pdfImagesDropzone.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    pdfImagesDropzone.classList.add("is-dragging");
-});
-pdfImagesDropzone.addEventListener("dragleave", () => pdfImagesDropzone.classList.remove("is-dragging"));
-pdfImagesDropzone.addEventListener("drop", (event) => {
-    event.preventDefault();
-    pdfImagesDropzone.classList.remove("is-dragging");
-    setPdfImagesFile([...event.dataTransfer.files].find(isPdf) || null);
-});
+setupDropzone(pdfImagesDropzone, (files) => setPdfImagesFile(files.find(isPdf) || null));
 
 function setPdfImagesFile(file) {
     selectedFile = file;
@@ -50,7 +42,7 @@ pdfImagesForm.addEventListener("submit", async (event) => {
 
     try {
         const response = await fetch("/api/pdf-to-images", { method: "POST", body: formData });
-        if (!response.ok) throw new Error((await response.json()).detail || "No se pudo convertir el PDF.");
+        if (!response.ok) throw new Error(await errorMessage(response, "No se pudo convertir el PDF."));
 
         const blob = await response.blob();
         const filename = downloadName(response) || `${baseName}.${blob.type === "application/zip" ? "zip" : pdfImagesFormat.value}`;
@@ -64,36 +56,9 @@ pdfImagesForm.addEventListener("submit", async (event) => {
     }
 });
 
-function downloadName(response) {
-    // Names with spaces or accents arrive encoded as filename*=utf-8''...
-    const header = response.headers.get("Content-Disposition") || "";
-    const encoded = header.match(/filename\*=utf-8''([^;]+)/i);
-    if (encoded) return decodeURIComponent(encoded[1]);
-    const plain = header.match(/filename="([^"]+)"/);
-    return plain ? plain[1] : null;
-}
-
 function resetPdfImagesForm() {
     selectedFile = null;
     pdfImagesInput.value = "";
     pdfImagesFileName.textContent = "o arrástralo aquí";
     pdfImagesBaseName.value = "pdf-images";
-}
-
-function setStatus(message, isError) {
-    pdfImagesStatus.textContent = message;
-    pdfImagesStatus.classList.toggle("is-error", isError);
-}
-
-function downloadBlob(blob, filename) {
-    const downloadUrl = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = downloadUrl;
-    link.download = filename;
-    link.click();
-    URL.revokeObjectURL(downloadUrl);
-}
-
-function isPdf(file) {
-    return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }

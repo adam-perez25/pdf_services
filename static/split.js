@@ -9,6 +9,7 @@ const splitRangeNames = document.querySelector("#split-range-names");
 const splitBaseNameField = document.querySelector("#split-base-name-field");
 const splitOutputName = document.querySelector("#split-output-name");
 const splitStatus = document.querySelector("#split-status");
+const setSplitStatus = statusSetter(splitStatus);
 
 let selectedFile = null;
 
@@ -16,16 +17,7 @@ splitFileInput.addEventListener("change", () => setSplitFile(splitFileInput.file
 splitMode.addEventListener("change", updateSplitModeFields);
 splitRanges.addEventListener("input", renderRangeNameFields);
 
-splitDropzone.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    splitDropzone.classList.add("is-dragging");
-});
-splitDropzone.addEventListener("dragleave", () => splitDropzone.classList.remove("is-dragging"));
-splitDropzone.addEventListener("drop", (event) => {
-    event.preventDefault();
-    splitDropzone.classList.remove("is-dragging");
-    setSplitFile([...event.dataTransfer.files].find(isPdf) || null);
-});
+setupDropzone(splitDropzone, (files) => setSplitFile(files.find(isPdf) || null));
 
 function setSplitFile(file) {
     selectedFile = file;
@@ -101,15 +93,6 @@ splitForm.addEventListener("submit", async (event) => {
     }
 });
 
-function downloadName(response) {
-    // Names with spaces or accents arrive encoded as filename*=utf-8''...
-    const header = response.headers.get("Content-Disposition") || "";
-    const encoded = header.match(/filename\*=utf-8''([^;]+)/i);
-    if (encoded) return decodeURIComponent(encoded[1]);
-    const plain = header.match(/filename="([^"]+)"/);
-    return plain ? plain[1] : null;
-}
-
 function parseRanges(value, pageCount) {
     const ranges = value.split(",").map((part) => part.trim()).filter(Boolean).map((part) => {
         const match = part.match(/^(\d+)(?:\s*-\s*(\d+))?$/);
@@ -134,7 +117,7 @@ async function requestSplit(file, { ranges, names, baseName }) {
         formData.append("base_name", baseName);
     }
     const response = await fetch("/api/split-zip", { method: "POST", body: formData });
-    if (!response.ok) throw new Error((await response.json()).detail || "No se pudo dividir el PDF.");
+    if (!response.ok) throw new Error(await errorMessage(response, "No se pudo dividir el PDF."));
     return response;
 }
 
@@ -147,28 +130,6 @@ function resetSplitForm() {
     splitRangeNames.innerHTML = "";
     splitMode.value = "pages";
     updateSplitModeFields();
-}
-
-function setSplitStatus(message, isError) {
-    splitStatus.textContent = message;
-    splitStatus.classList.toggle("is-error", isError);
-}
-
-function downloadBlob(blob, filename) {
-    const downloadUrl = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = downloadUrl;
-    link.download = filename;
-    link.click();
-    URL.revokeObjectURL(downloadUrl);
-}
-
-function isPdf(file) {
-    return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-}
-
-function escapeHtml(value) {
-    return value.replace(/[&<>\"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;" })[character]);
 }
 
 updateSplitModeFields();

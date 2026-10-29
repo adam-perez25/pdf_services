@@ -5,6 +5,7 @@ const imagesList = document.querySelector("#images-list");
 const imagesEmpty = document.querySelector("#images-empty");
 const imagesOutputName = document.querySelector("#images-output-name");
 const imagesStatus = document.querySelector("#images-status");
+const setStatus = statusSetter(imagesStatus);
 
 let selectedImages = [];
 let draggedIndex = null;
@@ -14,15 +15,8 @@ imagesInput.addEventListener("change", () => {
     renderImages();
 });
 
-imagesDropzone.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    imagesDropzone.classList.add("is-dragging");
-});
-imagesDropzone.addEventListener("dragleave", () => imagesDropzone.classList.remove("is-dragging"));
-imagesDropzone.addEventListener("drop", (event) => {
-    event.preventDefault();
-    imagesDropzone.classList.remove("is-dragging");
-    selectedImages = [...event.dataTransfer.files].filter(isImage);
+setupDropzone(imagesDropzone, (files) => {
+    selectedImages = files.filter(isImage);
     renderImages();
 });
 
@@ -95,8 +89,8 @@ imagesForm.addEventListener("submit", async (event) => {
 
     try {
         const response = await fetch("/api/images-to-pdf", { method: "POST", body: formData });
-        if (!response.ok) throw new Error((await response.json()).detail || "No se pudo crear el PDF.");
-        downloadBlob(await response.blob(), name.toLowerCase().endsWith(".pdf") ? name : `${name}.pdf`);
+        if (!response.ok) throw new Error(await errorMessage(response, "No se pudo crear el PDF."));
+        downloadBlob(await response.blob(), withPdfExtension(name));
         selectedImages = [];
         imagesInput.value = "";
         imagesOutputName.value = "images.pdf";
@@ -106,27 +100,5 @@ imagesForm.addEventListener("submit", async (event) => {
         setStatus(error.message, true);
     }
 });
-
-function setStatus(message, isError) {
-    imagesStatus.textContent = message;
-    imagesStatus.classList.toggle("is-error", isError);
-}
-
-function downloadBlob(blob, filename) {
-    const downloadUrl = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = downloadUrl;
-    link.download = filename;
-    link.click();
-    URL.revokeObjectURL(downloadUrl);
-}
-
-function isImage(file) {
-    return file.type.startsWith("image/");
-}
-
-function escapeHtml(value) {
-    return value.replace(/[&<>\"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;" })[character]);
-}
 
 renderImages();
