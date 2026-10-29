@@ -9,6 +9,7 @@ const pageCount = document.querySelector("#page-count");
 const pagesForm = document.querySelector("#pages-form");
 const pagesOutputName = document.querySelector("#pages-output-name");
 const pagesStatus = document.querySelector("#pages-status");
+const setStatus = statusSetter(pagesStatus);
 const pagePreview = document.querySelector("#page-preview");
 const pagePreviewTitle = document.querySelector("#page-preview-title");
 const pagePreviewPosition = document.querySelector("#page-preview-position");
@@ -32,16 +33,8 @@ pagesFileInput.addEventListener("change", () => {
     if (pagesFileInput.files[0]) loadFile(pagesFileInput.files[0]);
 });
 
-pagesDropzone.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    pagesDropzone.classList.add("is-dragging");
-});
-
-pagesDropzone.addEventListener("dragleave", () => pagesDropzone.classList.remove("is-dragging"));
-pagesDropzone.addEventListener("drop", (event) => {
-    event.preventDefault();
-    pagesDropzone.classList.remove("is-dragging");
-    const file = [...event.dataTransfer.files].find(isPdf);
+setupDropzone(pagesDropzone, (files) => {
+    const file = files.find(isPdf);
     if (file) loadFile(file);
 });
 
@@ -92,7 +85,7 @@ async function uploadDocument(file) {
     const formData = new FormData();
     formData.append("file", file, file.name);
     const response = await fetch("/api/documents", { method: "POST", body: formData });
-    if (!response.ok) throw new Error((await response.json()).detail || "No se pudo leer el PDF.");
+    if (!response.ok) throw new Error(await errorMessage(response, "No se pudo leer el PDF."));
     return response.json();
 }
 
@@ -436,33 +429,15 @@ pagesForm.addEventListener("submit", async (event) => {
             await reuploadDocument();
             response = await save();
         }
-        if (!response.ok) throw new Error((await response.json()).detail || "No se pudo crear el PDF.");
+        if (!response.ok) throw new Error(await errorMessage(response, "No se pudo crear el PDF."));
         // The server deleted its copy as part of the download.
         documentExpired = true;
 
-        downloadBlob(await response.blob(), name.toLowerCase().endsWith(".pdf") ? name : `${name}.pdf`);
+        downloadBlob(await response.blob(), withPdfExtension(name));
         setStatus("PDF creado y descargado.", false);
     } catch (error) {
         setStatus(error.message, true);
     }
 });
-
-function setStatus(message, isError) {
-    pagesStatus.textContent = message;
-    pagesStatus.classList.toggle("is-error", isError);
-}
-
-function downloadBlob(blob, filename) {
-    const downloadUrl = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = downloadUrl;
-    link.download = filename;
-    link.click();
-    URL.revokeObjectURL(downloadUrl);
-}
-
-function isPdf(file) {
-    return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-}
 
 renderPages();

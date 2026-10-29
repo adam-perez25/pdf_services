@@ -6,6 +6,7 @@ const fileCount = document.querySelector("#file-count");
 const mergeForm = document.querySelector("#merge-form");
 const outputName = document.querySelector("#output-name");
 const status = document.querySelector("#status");
+const setStatus = statusSetter(status);
 
 let selectedFiles = [];
 let draggedIndex = null;
@@ -15,16 +16,8 @@ fileInput.addEventListener("change", () => {
     renderFiles();
 });
 
-dropzone.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    dropzone.classList.add("is-dragging");
-});
-
-dropzone.addEventListener("dragleave", () => dropzone.classList.remove("is-dragging"));
-dropzone.addEventListener("drop", (event) => {
-    event.preventDefault();
-    dropzone.classList.remove("is-dragging");
-    selectedFiles = [...event.dataTransfer.files].filter(isPdf);
+setupDropzone(dropzone, (files) => {
+    selectedFiles = files.filter(isPdf);
     renderFiles();
 });
 
@@ -93,9 +86,9 @@ mergeForm.addEventListener("submit", async (event) => {
 
     try {
         const response = await fetch("/api/merge", { method: "POST", body: formData });
-        if (!response.ok) throw new Error((await response.json()).detail || "No se pudo crear el PDF.");
+        if (!response.ok) throw new Error(await errorMessage(response, "No se pudo crear el PDF."));
 
-        downloadBlob(await response.blob(), name.toLowerCase().endsWith(".pdf") ? name : `${name}.pdf`);
+        downloadBlob(await response.blob(), withPdfExtension(name));
         selectedFiles = [];
         outputName.value = "merged.pdf";
         renderFiles();
@@ -104,27 +97,5 @@ mergeForm.addEventListener("submit", async (event) => {
         setStatus(error.message, true);
     }
 });
-
-function setStatus(message, isError) {
-    status.textContent = message;
-    status.classList.toggle("is-error", isError);
-}
-
-function downloadBlob(blob, filename) {
-    const downloadUrl = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = downloadUrl;
-    link.download = filename;
-    link.click();
-    URL.revokeObjectURL(downloadUrl);
-}
-
-function isPdf(file) {
-    return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-}
-
-function escapeHtml(value) {
-    return value.replace(/[&<>\"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;" })[character]);
-}
 
 renderFiles();
