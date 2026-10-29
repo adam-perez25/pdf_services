@@ -11,13 +11,15 @@ import tempfile
 import threading
 import time
 import uuid
+import zipfile
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 import pypdfium2
 from pypdf import PdfReader, PdfWriter
+from starlette.background import BackgroundTask
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -238,6 +240,125 @@ def split_pdf(
         headers={
             "Content-Disposition": f'attachment; filename="{clean_output_name(output_name)}"',
         },
+    )
+
+
+def parse_page_ranges(value: str, page_count: int) -> list[tuple[int, int]]:
+    ranges = []
+    for part in filter(None, (part.strip() for part in value.split(","))):
+        match = re.fullmatch(r"(\d+)(?:\s*-\s*(\d+))?", part)
+        if not match:
+            raise HTTPException(status_code=400, detail=f"Rango inválido: {part}")
+        start = int(match.group(1))
+        end = int(match.group(2) or start)
+        if start < 1 or end < start or end > page_count:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Los rangos deben estar entre 1 y {page_count}.",
+            )
+        ranges.append((start, end))
+    if not ranges:
+        raise HTTPException(status_code=400, detail="Escribe al menos un rango de páginas.")
+    return ranges
+
+
+def unique_pdf_names(names: list[str]) -> list[str]:
+    # Two parts with the same name would overwrite each other inside the ZIP.
+    seen: dict[str, int] = {}
+    unique = []
+    for name in names:
+        stem = clean_output_name(name)[:-4]
+        count = seen.get(stem.lower(), 0) + 1
+        seen[stem.lower()] = count
+        unique.append(f"{stem}.pdf" if count == 1 else f"{stem}-{count}.pdf")
+    return unique
+
+
+@app.post("/api/split-zip")
+def split_pdf_zip(
+    file: UploadFile = File(...),
+    mode: str = Form("pages"),
+    ranges: str = Form(""),
+    names: str = Form("[]"),
+    base_name: str = Form("split-pdf"),
+):
+    """Split a PDF into several files in one request and return them as a ZIP.
+
+    mode "pages" makes one PDF per page named <base_name>-page-NNN.pdf;
+    mode "ranges" makes one PDF per range in `ranges` ("1-3, 4-6"), named by the
+    JSON list `names`. A single resulting part is returned as a plain PDF.
+    """
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+    if mode not in {"pages", "ranges"}:
+        raise HTTPException(status_code=400, detail="El modo debe ser pages o ranges.")
+
+    try:
+        reader = PdfReader(file.file)
+        page_count = len(reader.pages)
+        base = clean_base_name(base_name, "split-pdf")
+        if base.lower().endswith(".pdf"):
+            base = base[:-4]
+
+        if mode == "pages":
+            parts = [(page, page) for page in range(1, page_count + 1)]
+            digits = max(3, len(str(page_count)))
+            part_names = [f"{base}-page-{page:0{digits}d}.pdf" for page, _ in parts]
+            zip_name = f"{base}.zip"
+        else:
+            parts = parse_page_ranges(ranges, page_count)
+            try:
+                given_names = [str(name) for name in json.loads(names)]
+            except (ValueError, TypeError) as error:
+                raise HTTPException(status_code=400, detail="Los nombres no son válidos.") from error
+            given_names += [f"split-{start}-{end}" for start, end in parts[len(given_names):]]
+            part_names = unique_pdf_names(given_names[:len(parts)])
+            zip_name = f"{Path(file.filename).stem}-split.zip"
+
+        def build_part(start: int, end: int) -> bytes:
+            writer = PdfWriter()
+            for page_index in range(start - 1, end):
+                writer.add_page(reader.pages[page_index])
+            output = BytesIO()
+            writer.write(output)
+            writer.close()
+            return output.getvalue()
+
+        if len(parts) == 1:
+            return Response(
+                content=build_part(*parts[0]),
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="{part_names[0]}"'},
+            )
+
+        # The ZIP goes to the documents folder, so it is removed once sent and,
+        # if the download is interrupted, by the regular sweep. PDF content is
+        # already compressed, so the parts are stored as they are: compressing
+        # them again costs a lot of time and saves almost nothing.
+        DOCUMENTS_DIR.mkdir(exist_ok=True)
+        zip_path = DOCUMENTS_DIR / f"{uuid.uuid4().hex}.zip"
+        try:
+            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as archive:
+                for (start, end), part_name in zip(parts, part_names):
+                    archive.writestr(part_name, build_part(start, end))
+        except BaseException:
+            zip_path.unlink(missing_ok=True)
+            raise
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se pudo dividir el PDF: {error}",
+        ) from error
+    finally:
+        file.file.close()
+
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename=clean_base_name(zip_name, "split-pdf.zip"),
+        background=BackgroundTask(zip_path.unlink, missing_ok=True),
     )
 
 

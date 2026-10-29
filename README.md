@@ -13,8 +13,9 @@ mismo servidor y no requiere un frontend independiente.
 ## Funcionalidades
 
 - **Unir PDF:** combina varios archivos PDF en el orden seleccionado.
-- **Dividir PDF:** extrae un rango de páginas de un PDF y lo descarga como un
-  archivo independiente.
+- **Dividir PDF:** separa un PDF en una página por archivo o en rangos
+  personalizados con nombre propio. Todo se genera en una sola petición y se
+  descarga como un único ZIP (o como PDF si solo resulta un archivo).
 - **Imágenes a PDF:** convierte varias imágenes ordenadas en un único PDF,
   con una página por imagen.
 - **Word a PDF:** convierte archivos `.doc` y `.docx` mediante LibreOffice en
@@ -140,6 +141,7 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 | `POST` | `/api/merge` | Une varios PDF recibidos como `files`. |
 | `POST` | `/api/pdf-info` | Devuelve el número de páginas de un PDF. |
 | `POST` | `/api/split` | Extrae un rango mediante `start_page` y `end_page`. |
+| `POST` | `/api/split-zip` | Divide un PDF en una sola petición y devuelve un ZIP. `mode=pages` crea un PDF por página (`base_name`); `mode=ranges` usa `ranges` (`1-3, 4-6`) y la lista JSON `names`. Si solo resulta un archivo, devuelve el PDF directamente. |
 | `POST` | `/api/images-to-pdf` | Convierte las imágenes recibidas como `images`. |
 | `POST` | `/api/word-to-pdf` | Convierte un archivo `.doc` o `.docx`. |
 | `POST` | `/api/documents` | Sube un PDF una sola vez y devuelve su `id` y número de páginas. |

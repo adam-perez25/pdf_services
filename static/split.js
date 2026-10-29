@@ -71,48 +71,43 @@ splitForm.addEventListener("submit", async (event) => {
     }
 
     try {
-        setSplitStatus("Leyendo el documento...", false);
-        const pageCount = await getPageCount(selectedFile);
-        const ranges = splitMode.value === "pages"
-            ? Array.from({ length: pageCount }, (_, index) => ({ start: index + 1, end: index + 1 }))
-            : parseRanges(splitRanges.value, pageCount);
-        const names = splitMode.value === "pages" ? null : ranges.map((range, index) => {
+        // The page count is only known on the server, which validates the ranges.
+        const ranges = splitMode.value === "pages" ? null : parseRanges(splitRanges.value, Number.MAX_SAFE_INTEGER);
+        const names = ranges && ranges.map((range, index) => {
             const input = splitRangeNames.querySelector(`[data-range-name="${index}"]`);
             const name = input ? input.value.trim() : "";
             if (!name) throw new Error(`Escribe un nombre para el rango ${range.start}-${range.end}.`);
             return name;
         });
         const baseName = splitOutputName.value.trim();
-        if (splitMode.value === "pages" && !baseName) {
+        if (!ranges && !baseName) {
             setSplitStatus("Escribe un nombre base para los PDFs.", true);
             splitOutputName.focus();
             return;
         }
 
-        for (let index = 0; index < ranges.length; index += 1) {
-            const range = ranges[index];
-            setSplitStatus(`Descargando PDF ${index + 1} de ${ranges.length}...`, false);
-            const suffix = range.start === range.end
-                ? `page-${String(range.start).padStart(3, "0")}`
-                : `pages-${String(range.start).padStart(3, "0")}-${String(range.end).padStart(3, "0")}`;
-            const outputName = names ? names[index] : `${baseName}-${suffix}`;
-            const response = await requestSplit(selectedFile, outputName, range);
-            downloadBlob(await response.blob(), outputName.toLowerCase().endsWith(".pdf") ? outputName : `${outputName}.pdf`);
-        }
+        setSplitStatus("Dividiendo el documento...", false);
+        const response = await requestSplit(selectedFile, { ranges, names, baseName });
+        const blob = await response.blob();
+        const filename = downloadName(response) || (blob.type === "application/zip" ? "split.zip" : "split.pdf");
+        downloadBlob(blob, filename);
 
         resetSplitForm();
-        setSplitStatus(`${ranges.length} PDF${ranges.length === 1 ? " creado" : " creados"} y descargado${ranges.length === 1 ? "" : "s"}.`, false);
+        setSplitStatus(blob.type === "application/zip"
+            ? `PDFs creados y descargados en ${filename}.`
+            : "PDF creado y descargado.", false);
     } catch (error) {
         setSplitStatus(error.message, true);
     }
 });
 
-async function getPageCount(file) {
-    const formData = new FormData();
-    formData.append("file", file, file.name);
-    const response = await fetch("/api/pdf-info", { method: "POST", body: formData });
-    if (!response.ok) throw new Error((await response.json()).detail || "No se pudo leer el PDF.");
-    return (await response.json()).pages;
+function downloadName(response) {
+    // Names with spaces or accents arrive encoded as filename*=utf-8''...
+    const header = response.headers.get("Content-Disposition") || "";
+    const encoded = header.match(/filename\*=utf-8''([^;]+)/i);
+    if (encoded) return decodeURIComponent(encoded[1]);
+    const plain = header.match(/filename="([^"]+)"/);
+    return plain ? plain[1] : null;
 }
 
 function parseRanges(value, pageCount) {
@@ -128,13 +123,17 @@ function parseRanges(value, pageCount) {
     return ranges;
 }
 
-async function requestSplit(file, outputName, range) {
+async function requestSplit(file, { ranges, names, baseName }) {
     const formData = new FormData();
     formData.append("file", file, file.name);
-    formData.append("output_name", outputName);
-    formData.append("start_page", range.start);
-    formData.append("end_page", range.end);
-    const response = await fetch("/api/split", { method: "POST", body: formData });
+    formData.append("mode", ranges ? "ranges" : "pages");
+    if (ranges) {
+        formData.append("ranges", splitRanges.value);
+        formData.append("names", JSON.stringify(names));
+    } else {
+        formData.append("base_name", baseName);
+    }
+    const response = await fetch("/api/split-zip", { method: "POST", body: formData });
     if (!response.ok) throw new Error((await response.json()).detail || "No se pudo dividir el PDF.");
     return response;
 }
