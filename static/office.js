@@ -8,6 +8,7 @@ const officeFileName = document.querySelector("#office-file-name");
 const officeOutputName = document.querySelector("#office-output-name");
 const officeStatus = document.querySelector("#office-status");
 const setStatus = statusSetter(officeStatus);
+const progress = uploadProgress(officeStatus);
 
 const { endpoint, extensions, defaultName, missingFile } = officeForm.dataset;
 const extensionPattern = new RegExp(`\\.(${extensions.split(",").join("|")})$`, "i");
@@ -45,7 +46,7 @@ officeForm.addEventListener("submit", async (event) => {
     try {
         const saveHandle = await chooseSaveTarget(filename);
         setStatus("Convirtiendo documento...", false);
-        const response = await fetch(endpoint, { method: "POST", body: formData });
+        const response = await postForm(endpoint, formData, progress);
         if (!response.ok) throw new Error(await errorMessage(response, "No se pudo convertir el documento."));
         await savePdf(await response.blob(), filename, saveHandle);
         selectedOfficeFile = null;

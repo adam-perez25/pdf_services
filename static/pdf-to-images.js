@@ -7,6 +7,7 @@ const pdfImagesDpi = document.querySelector("#pdf-images-dpi");
 const pdfImagesBaseName = document.querySelector("#pdf-images-base-name");
 const pdfImagesStatus = document.querySelector("#pdf-images-status");
 const setStatus = statusSetter(pdfImagesStatus);
+const progress = uploadProgress(pdfImagesStatus);
 
 let selectedFile = null;
 
@@ -41,7 +42,7 @@ pdfImagesForm.addEventListener("submit", async (event) => {
     setStatus("Convirtiendo las páginas... los documentos largos pueden tardar un poco.", false);
 
     try {
-        const response = await fetch("/api/pdf-to-images", { method: "POST", body: formData });
+        const response = await postForm("/api/pdf-to-images", formData, progress);
         if (!response.ok) throw new Error(await errorMessage(response, "No se pudo convertir el PDF."));
 
         const blob = await response.blob();

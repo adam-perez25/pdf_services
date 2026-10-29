@@ -7,6 +7,7 @@ const mergeForm = document.querySelector("#merge-form");
 const outputName = document.querySelector("#output-name");
 const status = document.querySelector("#status");
 const setStatus = statusSetter(status);
+const progress = uploadProgress(status);
 
 let selectedFiles = [];
 let draggedIndex = null;
@@ -85,7 +86,7 @@ mergeForm.addEventListener("submit", async (event) => {
     setStatus("Uniendo documentos...", false);
 
     try {
-        const response = await fetch("/api/merge", { method: "POST", body: formData });
+        const response = await postForm("/api/merge", formData, progress);
         if (!response.ok) throw new Error(await errorMessage(response, "No se pudo crear el PDF."));
 
         downloadBlob(await response.blob(), withPdfExtension(name));

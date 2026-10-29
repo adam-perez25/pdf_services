@@ -6,6 +6,7 @@ const compressLevel = document.querySelector("#compress-level");
 const compressOutputName = document.querySelector("#compress-output-name");
 const compressStatus = document.querySelector("#compress-status");
 const setStatus = statusSetter(compressStatus);
+const progress = uploadProgress(compressStatus);
 
 let selectedFile = null;
 
@@ -39,7 +40,7 @@ compressForm.addEventListener("submit", async (event) => {
     setStatus("Comprimiendo... los documentos escaneados grandes pueden tardar un poco.", false);
 
     try {
-        const response = await fetch("/api/compress", { method: "POST", body: formData });
+        const response = await postForm("/api/compress", formData, progress);
         if (!response.ok) throw new Error(await errorMessage(response, "No se pudo comprimir el PDF."));
 
         downloadBlob(await response.blob(), withPdfExtension(name));
