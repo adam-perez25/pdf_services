@@ -584,6 +584,20 @@ def edit_pages(
     )
 
 
+A4_SHORT_INCHES = 210 / 25.4
+A4_LONG_INCHES = 297 / 25.4
+MIN_IMAGE_DPI = 72
+
+
+def a4_resolution(width: int, height: int) -> float:
+    """Return the dpi at which an image fits an A4 page in its own orientation.
+
+    Small images keep 72 dpi (their natural size) instead of being blown up.
+    """
+    short_side, long_side = sorted((width, height))
+    return max(short_side / A4_SHORT_INCHES, long_side / A4_LONG_INCHES, MIN_IMAGE_DPI)
+
+
 @app.post("/api/images-to-pdf")
 def images_to_pdf(
     images: list[UploadFile] = File(...),
@@ -604,14 +618,15 @@ def images_to_pdf(
                     detail=f"El archivo {image_file.filename or 'seleccionado'} no es una imagen válida.",
                 ) from error
 
+        # Pillow applies one resolution to every page, so each image becomes
+        # its own one-page PDF at its own dpi and the pages are merged after.
+        writer = PdfWriter()
+        for image in converted_images:
+            page = BytesIO()
+            image.save(page, format="PDF", resolution=a4_resolution(*image.size))
+            writer.append(PdfReader(page))
         output = BytesIO()
-        converted_images[0].save(
-            output,
-            format="PDF",
-            save_all=True,
-            append_images=converted_images[1:],
-        )
-        output.seek(0)
+        writer.write(output)
     except HTTPException:
         raise
     except Exception as error:
