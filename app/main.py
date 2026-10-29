@@ -100,6 +100,11 @@ async def compress_page():
     return render_page("compress.html")
 
 
+@app.get("/pdf-to-images", response_class=HTMLResponse)
+async def pdf_to_images_page():
+    return render_page("pdf-to-images.html")
+
+
 @app.get("/health")
 def health():
     # Used by the Docker HEALTHCHECK. The service is unhealthy only if it cannot
@@ -667,6 +672,120 @@ def images_to_pdf(
         headers={
             "Content-Disposition": f'attachment; filename="{clean_output_name(output_name)}"',
         },
+    )
+
+
+IMAGE_FORMATS = {
+    "png": ("PNG", "image/png"),
+    "jpg": ("JPEG", "image/jpeg"),
+}
+IMAGE_DPI_CHOICES = {72, 150, 300}
+# A big page at 300 dpi (A0 is about 140 million pixels) would need gigabytes of
+# memory, so such pages are rendered at a lower resolution instead.
+MAX_IMAGE_PIXELS = 40_000_000
+
+
+@app.post("/api/pdf-to-images")
+def pdf_to_images(
+    file: UploadFile = File(...),
+    image_format: str = Form("png"),
+    dpi: int = Form(150),
+    base_name: str = Form(""),
+):
+    """Render every page of a PDF as a PNG or JPG image.
+
+    The images are named <base_name>-page-NNN.<ext> and returned as a ZIP; a
+    one-page PDF is returned as a plain image.
+    """
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+    if image_format not in IMAGE_FORMATS:
+        raise HTTPException(status_code=400, detail="El formato debe ser png o jpg.")
+    if dpi not in IMAGE_DPI_CHOICES:
+        raise HTTPException(status_code=400, detail="La resolución debe ser 72, 150 o 300 ppp.")
+
+    pil_format, media_type = IMAGE_FORMATS[image_format]
+    base = clean_base_name(base_name or Path(file.filename).stem, "pdf-images")
+    if base.lower().endswith(".pdf"):
+        base = base[:-4]
+
+    # The upload and the ZIP live in the documents folder, so the regular sweep
+    # removes them if the server stops halfway; normally they are deleted once
+    # the response is sent.
+    DOCUMENTS_DIR.mkdir(exist_ok=True)
+    job_id = uuid.uuid4().hex
+    input_path = DOCUMENTS_DIR / f"{job_id}.in.pdf"
+    zip_path = DOCUMENTS_DIR / f"{job_id}.zip"
+
+    def remove_job_files():
+        input_path.unlink(missing_ok=True)
+        zip_path.unlink(missing_ok=True)
+
+    def render_page_image(document: pypdfium2.PdfDocument, index: int) -> bytes:
+        pdf_page = document[index]
+        try:
+            scale = dpi / 72
+            pixels = pdf_page.get_width() * pdf_page.get_height() * scale * scale
+            if pixels > MAX_IMAGE_PIXELS:
+                scale *= (MAX_IMAGE_PIXELS / pixels) ** 0.5
+            bitmap = pdf_page.render(scale=scale)
+            image = bitmap.to_pil().convert("RGB")
+            output = BytesIO()
+            if pil_format == "JPEG":
+                image.save(output, format="JPEG", quality=90, dpi=(dpi, dpi))
+            else:
+                image.save(output, format="PNG", dpi=(dpi, dpi))
+            image.close()
+            bitmap.close()
+            return output.getvalue()
+        finally:
+            pdf_page.close()
+
+    try:
+        with input_path.open("wb") as destination:
+            shutil.copyfileobj(file.file, destination)
+
+        # pdfium is not thread-safe, so the whole render holds the lock.
+        with PDFIUM_LOCK:
+            document = pypdfium2.PdfDocument(input_path)
+            try:
+                page_count = len(document)
+                digits = max(3, len(str(page_count)))
+                names = [f"{base}-page-{page:0{digits}d}.{image_format}" for page in range(1, page_count + 1)]
+
+                if page_count == 1:
+                    single_image = render_page_image(document, 0)
+                else:
+                    single_image = None
+                    # PNG and JPG are already compressed, so they are stored as is.
+                    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as archive:
+                        for index, name in enumerate(names):
+                            archive.writestr(name, render_page_image(document, index))
+            finally:
+                document.close()
+    except Exception as error:
+        remove_job_files()
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se pudo convertir el PDF en imágenes: {error}",
+        ) from error
+    finally:
+        file.file.close()
+
+    if single_image is not None:
+        remove_job_files()
+        return Response(
+            content=single_image,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{names[0]}"'},
+        )
+
+    input_path.unlink(missing_ok=True)
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename=f"{base}-{image_format}.zip",
+        background=BackgroundTask(remove_job_files),
     )
 
 

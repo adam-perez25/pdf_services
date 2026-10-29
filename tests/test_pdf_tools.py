@@ -8,7 +8,7 @@ import app.main as main
 from conftest import make_pdf, make_png, page_layout
 
 
-@pytest.mark.parametrize("path", ["/", "/merge", "/split", "/images", "/word", "/excel", "/powerpoint", "/pages", "/compress"])
+@pytest.mark.parametrize("path", ["/", "/merge", "/split", "/images", "/word", "/excel", "/powerpoint", "/pages", "/compress", "/pdf-to-images"])
 def test_pages_load(client, path):
     response = client.get(path)
 

@@ -2,8 +2,8 @@
 
 Aplicación web para trabajar con documentos desde el navegador. Permite unir y
 dividir archivos PDF, organizar sus páginas, comprimirlos, convertir imágenes
-a PDF y transformar documentos Word, hojas de cálculo Excel y presentaciones
-PowerPoint en PDF.
+a PDF, exportar las páginas de un PDF como imágenes y transformar documentos
+Word, hojas de cálculo Excel y presentaciones PowerPoint en PDF.
 
 La aplicación está construida con [FastAPI](https://fastapi.tiangolo.com/),
 [pypdf](https://pypi.org/project/pypdf/),
@@ -26,6 +26,9 @@ mismo servidor y no requiere un frontend independiente.
   libro pasan al PDF.
 - **PowerPoint a PDF:** convierte archivos `.ppt` y `.pptx`, con una página
   por diapositiva.
+- **PDF a imágenes:** convierte cada página de un PDF en una imagen PNG o JPG
+  a 72, 150 o 300 ppp. Las imágenes se descargan juntas en un ZIP (o como una
+  sola imagen si el PDF tiene una página).
 - **Comprimir PDF:** reduce el tamaño bajando la resolución de las imágenes
   mediante Ghostscript, ideal para documentos escaneados. Tres niveles: máxima
   (72 ppp), recomendada (150 ppp) y alta calidad (300 ppp). Si el resultado no
@@ -155,6 +158,7 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 | `POST` | `/api/split` | Extrae un rango mediante `start_page` y `end_page`. |
 | `POST` | `/api/split-zip` | Divide un PDF en una sola petición y devuelve un ZIP. `mode=pages` crea un PDF por página (`base_name`); `mode=ranges` usa `ranges` (`1-3, 4-6`) y la lista JSON `names`. Si solo resulta un archivo, devuelve el PDF directamente. |
 | `POST` | `/api/images-to-pdf` | Convierte las imágenes recibidas como `images`. |
+| `POST` | `/api/pdf-to-images` | Convierte cada página de un PDF en una imagen; `image_format` es `png` (por defecto) o `jpg`, `dpi` es `72`, `150` (por defecto) o `300` y `base_name` da nombre a las imágenes (`<base_name>-page-001.png`). Devuelve un ZIP, o la imagen directamente si el PDF tiene una página. |
 | `POST` | `/api/word-to-pdf` | Convierte un archivo `.doc` o `.docx`. |
 | `POST` | `/api/excel-to-pdf` | Convierte un archivo `.xls` o `.xlsx`. |
 | `POST` | `/api/powerpoint-to-pdf` | Convierte un archivo `.ppt` o `.pptx`. |
