@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 import threading
@@ -139,6 +140,44 @@ def find_soffice() -> str | None:
 
 def find_ghostscript() -> str | None:
     return shutil.which("gs") or shutil.which("gswin64c") or shutil.which("gswin32c")
+
+
+def run_tool(command: list[str], timeout: float) -> subprocess.CompletedProcess:
+    """Run an external tool, and on timeout kill it with every process it started.
+
+    soffice is only a launcher: the conversion runs in a soffice.bin child, which
+    subprocess.run's timeout would leave running after killing the launcher.
+    On POSIX the tool gets its own process group, so the whole group is killed.
+    """
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=os.name == "posix",
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except BaseException:
+        kill_process_tree(process)
+        process.communicate()
+        raise
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
+def kill_process_tree(process: subprocess.Popen) -> None:
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    else:
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True,
+            check=False,
+        )
+        process.kill()
 
 
 def render_page(template_name: str) -> HTMLResponse:
@@ -617,6 +656,9 @@ def edit_pages(
 A4_SHORT_INCHES = 210 / 25.4
 A4_LONG_INCHES = 297 / 25.4
 MIN_IMAGE_DPI = 72
+# Pillow also opens formats such as EPS, which it renders by running
+# Ghostscript on the upload; only plain raster formats are accepted.
+ALLOWED_IMAGE_FORMATS = ["PNG", "JPEG", "WEBP", "GIF", "BMP", "TIFF"]
 
 
 def a4_resolution(width: int, height: int) -> float:
@@ -640,7 +682,7 @@ def images_to_pdf(
     try:
         for image_file in images:
             try:
-                with Image.open(image_file.file) as image:
+                with Image.open(image_file.file, formats=ALLOWED_IMAGE_FORMATS) as image:
                     converted_images.append(image.convert("RGB"))
             except (UnidentifiedImageError, OSError) as error:
                 raise HTTPException(
@@ -817,6 +859,9 @@ def powerpoint_to_pdf(
     return convert_office_to_pdf(file, output_name, {".ppt", ".pptx"}, "PPT o PPTX")
 
 
+OFFICE_TIMEOUT_SECONDS = 120
+
+
 def convert_office_to_pdf(
     file: UploadFile,
     output_name: str,
@@ -844,7 +889,7 @@ def convert_office_to_pdf(
             input_path = temporary_path / f"source{file_extension}"
             input_path.write_bytes(file.file.read())
             profile_path = temporary_path / "profile"
-            result = subprocess.run(
+            result = run_tool(
                 [
                     soffice,
                     "--headless",
@@ -855,10 +900,7 @@ def convert_office_to_pdf(
                     str(temporary_path),
                     str(input_path),
                 ],
-                capture_output=True,
-                text=True,
-                timeout=120,
-                check=False,
+                timeout=OFFICE_TIMEOUT_SECONDS,
             )
             output_path = temporary_path / "source.pdf"
             if result.returncode != 0 or not output_path.exists():
@@ -931,7 +973,7 @@ def compress_pdf(
         # this really is a readable PDF first.
         with PDFIUM_LOCK:
             pypdfium2.PdfDocument(input_path).close()
-        result = subprocess.run(
+        result = run_tool(
             [
                 ghostscript,
                 "-dSAFER",
@@ -951,10 +993,7 @@ def compress_pdf(
                 f"-sOutputFile={output_path}",
                 str(input_path),
             ],
-            capture_output=True,
-            text=True,
             timeout=COMPRESSION_TIMEOUT_SECONDS,
-            check=False,
         )
         if result.returncode != 0 or not output_path.exists() or output_path.stat().st_size == 0:
             detail = result.stderr.strip() or result.stdout.strip()
