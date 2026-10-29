@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Excel a PDF | PDF Toolkit</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <main class="shell service-page">
+        <section class="intro">
+            <p class="eyebrow">SERVICIO 07 / CONVERTIR</p>
+            <h1>Convierte Excel<br><em>en un PDF.</em></h1>
+            <p class="lede">Sube una hoja de cálculo XLS o XLSX y descarga su versión en PDF.</p>
+        </section>
+
+        <nav class="service-back" aria-label="Navegación del servicio">
+            <a class="back-button" href="/">&#8592; Menu</a>
+        </nav>
+
+        <section class="workspace" aria-labelledby="office-title">
+            <div class="view-heading">
+                <h2 id="office-title">Hoja de cálculo Excel</h2>
+                <p class="view-lede">Todas las hojas del libro se convierten mediante LibreOffice.</p>
+            </div>
+
+            <form id="office-form" data-endpoint="/api/excel-to-pdf" data-extensions="xls,xlsx" data-default-name="spreadsheet.pdf" data-missing-file="Selecciona una hoja de cálculo Excel.">
+                <label class="dropzone" for="office-input" id="office-dropzone">
+                    <span class="drop-icon">+</span>
+                    <span><strong>Seleccionar hoja de cálculo</strong><small id="office-file-name">o arrástrala aquí</small></span>
+                    <input id="office-input" type="file" accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+                </label>
+
+                <label class="name-field">
+                    <span>Nombre del PDF</span>
+                    <input id="office-output-name" type="text" value="spreadsheet.pdf" maxlength="120" autocomplete="off">
+                </label>
+                <button class="primary-button" type="submit">
+                    <span>Convertir y descargar PDF</span>
+                    <span aria-hidden="true">&#8594;</span>
+                </button>
+            </form>
+            <p id="office-status" class="status" role="status"></p>
+        </section>
+    </main>
+    <script src="/static/office.js"></script>
+</body>
+</html>

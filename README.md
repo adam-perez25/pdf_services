@@ -2,7 +2,8 @@
 
 Aplicación web para trabajar con documentos desde el navegador. Permite unir y
 dividir archivos PDF, organizar sus páginas, comprimirlos, convertir imágenes
-a PDF y transformar documentos Word en PDF.
+a PDF y transformar documentos Word, hojas de cálculo Excel y presentaciones
+PowerPoint en PDF.
 
 La aplicación está construida con [FastAPI](https://fastapi.tiangolo.com/),
 [pypdf](https://pypi.org/project/pypdf/),
@@ -21,6 +22,10 @@ mismo servidor y no requiere un frontend independiente.
   orientación de la imagen; las imágenes pequeñas no se amplían.
 - **Word a PDF:** convierte archivos `.doc` y `.docx` mediante LibreOffice en
   modo headless.
+- **Excel a PDF:** convierte archivos `.xls` y `.xlsx`; todas las hojas del
+  libro pasan al PDF.
+- **PowerPoint a PDF:** convierte archivos `.ppt` y `.pptx`, con una página
+  por diapositiva.
 - **Comprimir PDF:** reduce el tamaño bajando la resolución de las imágenes
   mediante Ghostscript, ideal para documentos escaneados. Tres niveles: máxima
   (72 ppp), recomendada (150 ppp) y alta calidad (300 ppp). Si el resultado no
@@ -39,8 +44,8 @@ La aplicación no incluye almacenamiento permanente de documentos.
 Para ejecutar el proyecto directamente:
 
 - Python 3.12 o una versión compatible con las dependencias del proyecto.
-- LibreOffice instalado y disponible en el `PATH` para usar la conversión de
-  Word.
+- LibreOffice (Writer, Calc e Impress) instalado y disponible en el `PATH`
+  para usar las conversiones de Word, Excel y PowerPoint.
 - Ghostscript instalado y disponible en el `PATH` (`gs`, o `gswin64c` en
   Windows) para usar la compresión.
 
@@ -134,8 +139,8 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 Cuando se ejecute fuera de Docker, LibreOffice debe estar instalado por
-separado para que funcione **Word a PDF**. Si no está disponible, esa
-operación responderá con un error y las demás herramientas seguirán
+separado para que funcionen **Word a PDF**, **Excel a PDF** y **PowerPoint a
+PDF**. Si no está disponible, esas operaciones responderán con un error y las demás herramientas seguirán
 disponibles.
 
 ## API
@@ -144,13 +149,15 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 
 | Método | Ruta | Descripción |
 | --- | --- | --- |
-| `GET` | `/health` | Estado del servicio: `storage` (puede guardar archivos temporales), `libreoffice` (Word a PDF disponible) y `ghostscript` (compresión disponible). Responde `503` si no puede guardar archivos. |
+| `GET` | `/health` | Estado del servicio: `storage` (puede guardar archivos temporales), `libreoffice` (conversiones de Office disponibles) y `ghostscript` (compresión disponible). Responde `503` si no puede guardar archivos. |
 | `POST` | `/api/merge` | Une varios PDF recibidos como `files`. |
 | `POST` | `/api/pdf-info` | Devuelve el número de páginas de un PDF. |
 | `POST` | `/api/split` | Extrae un rango mediante `start_page` y `end_page`. |
 | `POST` | `/api/split-zip` | Divide un PDF en una sola petición y devuelve un ZIP. `mode=pages` crea un PDF por página (`base_name`); `mode=ranges` usa `ranges` (`1-3, 4-6`) y la lista JSON `names`. Si solo resulta un archivo, devuelve el PDF directamente. |
 | `POST` | `/api/images-to-pdf` | Convierte las imágenes recibidas como `images`. |
 | `POST` | `/api/word-to-pdf` | Convierte un archivo `.doc` o `.docx`. |
+| `POST` | `/api/excel-to-pdf` | Convierte un archivo `.xls` o `.xlsx`. |
+| `POST` | `/api/powerpoint-to-pdf` | Convierte un archivo `.ppt` o `.pptx`. |
 | `POST` | `/api/compress` | Comprime un PDF; `level` es `strong`, `recommended` (por defecto) o `high`. Las cabeceras `X-Original-Size`, `X-Compressed-Size` y `X-Compression-Applied` indican el resultado. |
 | `POST` | `/api/documents` | Sube un PDF una sola vez y devuelve su `id` y número de páginas. |
 | `GET` | `/api/documents/{id}/pages/{n}` | Devuelve la página `n` como JPEG; `width` controla el tamaño (100-2000 px). |
@@ -183,7 +190,7 @@ python -m pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-Las pruebas de conversión de Word y de compresión se omiten automáticamente si
+Las pruebas de conversión de Office y de compresión se omiten automáticamente si
 LibreOffice o Ghostscript no están instalados. Las pruebas no forman parte de la imagen de Docker.
 
 ## Estructura del proyecto

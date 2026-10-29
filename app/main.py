@@ -80,6 +80,16 @@ async def word_page():
     return render_page("word.html")
 
 
+@app.get("/excel", response_class=HTMLResponse)
+async def excel_page():
+    return render_page("excel.html")
+
+
+@app.get("/powerpoint", response_class=HTMLResponse)
+async def powerpoint_page():
+    return render_page("powerpoint.html")
+
+
 @app.get("/pages", response_class=HTMLResponse)
 async def pages_page():
     return render_page("pages.html")
@@ -94,7 +104,7 @@ async def compress_page():
 def health():
     # Used by the Docker HEALTHCHECK. The service is unhealthy only if it cannot
     # store uploads; a missing LibreOffice or Ghostscript is reported but only
-    # disables Word to PDF or Compress PDF.
+    # disables the Office conversions or Compress PDF.
     try:
         DOCUMENTS_DIR.mkdir(exist_ok=True)
         with tempfile.NamedTemporaryFile(dir=DOCUMENTS_DIR, prefix=".health-"):
@@ -665,12 +675,41 @@ def word_to_pdf(
     file: UploadFile = File(...),
     output_name: str = Form("document.pdf"),
 ):
+    return convert_office_to_pdf(file, output_name, {".doc", ".docx"}, "DOC o DOCX")
+
+
+@app.post("/api/excel-to-pdf")
+def excel_to_pdf(
+    file: UploadFile = File(...),
+    output_name: str = Form("spreadsheet.pdf"),
+):
+    return convert_office_to_pdf(file, output_name, {".xls", ".xlsx"}, "XLS o XLSX")
+
+
+@app.post("/api/powerpoint-to-pdf")
+def powerpoint_to_pdf(
+    file: UploadFile = File(...),
+    output_name: str = Form("presentation.pdf"),
+):
+    return convert_office_to_pdf(file, output_name, {".ppt", ".pptx"}, "PPT o PPTX")
+
+
+def convert_office_to_pdf(
+    file: UploadFile,
+    output_name: str,
+    extensions: set[str],
+    formats_label: str,
+) -> Response:
+    # LibreOffice picks Writer, Calc or Impress from the file extension, so the
+    # upload keeps its own extension on disk.
     file_extension = Path(file.filename or "").suffix.lower()
-    if file_extension not in {".doc", ".docx"}:
-        raise HTTPException(status_code=400, detail="El archivo debe ser DOC o DOCX.")
+    if file_extension not in extensions:
+        file.file.close()
+        raise HTTPException(status_code=400, detail=f"El archivo debe ser {formats_label}.")
 
     soffice = find_soffice()
     if not soffice:
+        file.file.close()
         raise HTTPException(
             status_code=503,
             detail="LibreOffice no está instalado o no está disponible en el PATH.",

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PowerPoint a PDF | PDF Toolkit</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <main class="shell service-page">
+        <section class="intro">
+            <p class="eyebrow">SERVICIO 08 / CONVERTIR</p>
+            <h1>Convierte PowerPoint<br><em>en un PDF.</em></h1>
+            <p class="lede">Sube una presentación PPT o PPTX y descarga su versión en PDF.</p>
+        </section>
+
+        <nav class="service-back" aria-label="Navegación del servicio">
+            <a class="back-button" href="/">&#8592; Menu</a>
+        </nav>
+
+        <section class="workspace" aria-labelledby="office-title">
+            <div class="view-heading">
+                <h2 id="office-title">Presentación PowerPoint</h2>
+                <p class="view-lede">Cada diapositiva se convierte en una página mediante LibreOffice.</p>
+            </div>
+
+            <form id="office-form" data-endpoint="/api/powerpoint-to-pdf" data-extensions="ppt,pptx" data-default-name="presentation.pdf" data-missing-file="Selecciona una presentación PowerPoint.">
+                <label class="dropzone" for="office-input" id="office-dropzone">
+                    <span class="drop-icon">+</span>
+                    <span><strong>Seleccionar presentación</strong><small id="office-file-name">o arrástrala aquí</small></span>
+                    <input id="office-input" type="file" accept=".ppt,.pptx,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation">
+                </label>
+
+                <label class="name-field">
+                    <span>Nombre del PDF</span>
+                    <input id="office-output-name" type="text" value="presentation.pdf" maxlength="120" autocomplete="off">
+                </label>
+                <button class="primary-button" type="submit">
+                    <span>Convertir y descargar PDF</span>
+                    <span aria-hidden="true">&#8594;</span>
+                </button>
+            </form>
+            <p id="office-status" class="status" role="status"></p>
+        </section>
+    </main>
+    <script src="/static/office.js"></script>
+</body>
+</html>
