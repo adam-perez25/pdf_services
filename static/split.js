@@ -10,6 +10,7 @@ const splitBaseNameField = document.querySelector("#split-base-name-field");
 const splitOutputName = document.querySelector("#split-output-name");
 const splitStatus = document.querySelector("#split-status");
 const setSplitStatus = statusSetter(splitStatus);
+const progress = uploadProgress(splitStatus);
 
 let selectedFile = null;
 
@@ -116,7 +117,7 @@ async function requestSplit(file, { ranges, names, baseName }) {
     } else {
         formData.append("base_name", baseName);
     }
-    const response = await fetch("/api/split-zip", { method: "POST", body: formData });
+    const response = await postForm("/api/split-zip", formData, progress);
     if (!response.ok) throw new Error(await errorMessage(response, "No se pudo dividir el PDF."));
     return response;
 }

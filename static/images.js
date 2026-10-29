@@ -6,6 +6,7 @@ const imagesEmpty = document.querySelector("#images-empty");
 const imagesOutputName = document.querySelector("#images-output-name");
 const imagesStatus = document.querySelector("#images-status");
 const setStatus = statusSetter(imagesStatus);
+const progress = uploadProgress(imagesStatus);
 
 let selectedImages = [];
 let draggedIndex = null;
@@ -88,7 +89,7 @@ imagesForm.addEventListener("submit", async (event) => {
     setStatus("Convirtiendo imágenes...", false);
 
     try {
-        const response = await fetch("/api/images-to-pdf", { method: "POST", body: formData });
+        const response = await postForm("/api/images-to-pdf", formData, progress);
         if (!response.ok) throw new Error(await errorMessage(response, "No se pudo crear el PDF."));
         downloadBlob(await response.blob(), withPdfExtension(name));
         selectedImages = [];

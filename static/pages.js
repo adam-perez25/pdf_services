@@ -10,6 +10,7 @@ const pagesForm = document.querySelector("#pages-form");
 const pagesOutputName = document.querySelector("#pages-output-name");
 const pagesStatus = document.querySelector("#pages-status");
 const setStatus = statusSetter(pagesStatus);
+const progress = uploadProgress(pagesStatus);
 const pagePreview = document.querySelector("#page-preview");
 const pagePreviewTitle = document.querySelector("#page-preview-title");
 const pagePreviewPosition = document.querySelector("#page-preview-position");
@@ -84,7 +85,7 @@ async function loadFile(file) {
 async function uploadDocument(file) {
     const formData = new FormData();
     formData.append("file", file, file.name);
-    const response = await fetch("/api/documents", { method: "POST", body: formData });
+    const response = await postForm("/api/documents", formData, progress);
     if (!response.ok) throw new Error(await errorMessage(response, "No se pudo leer el PDF."));
     return response.json();
 }
