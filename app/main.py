@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from io import BytesIO
 import json
 import logging
@@ -12,7 +13,7 @@ import time
 import uuid
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 import pypdfium2
@@ -30,7 +31,15 @@ THUMBNAIL_WIDTH = 300
 MIN_RENDER_WIDTH = 100
 MAX_RENDER_WIDTH = 2000
 logger = logging.getLogger("uvicorn.error")
-app = FastAPI(title="Unir PDF")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    start_document_sweeper()
+    yield
+
+
+app = FastAPI(title="Unir PDF", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 
@@ -72,6 +81,32 @@ async def word_page():
 @app.get("/pages", response_class=HTMLResponse)
 async def pages_page():
     return render_page("pages.html")
+
+
+@app.get("/health")
+def health():
+    # Used by the Docker HEALTHCHECK. The service is unhealthy only if it cannot
+    # store uploads; a missing LibreOffice is reported but only disables Word.
+    try:
+        DOCUMENTS_DIR.mkdir(exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=DOCUMENTS_DIR, prefix=".health-"):
+            pass
+        storage_ok = True
+    except OSError:
+        storage_ok = False
+
+    return JSONResponse(
+        status_code=200 if storage_ok else 503,
+        content={
+            "status": "ok" if storage_ok else "error",
+            "storage": storage_ok,
+            "libreoffice": find_soffice() is not None,
+        },
+    )
+
+
+def find_soffice() -> str | None:
+    return shutil.which("soffice") or shutil.which("soffice.exe")
 
 
 def render_page(template_name: str) -> HTMLResponse:
@@ -259,7 +294,6 @@ def sweep_documents_forever() -> None:
             logger.exception("No se pudieron limpiar los documentos temporales.")
 
 
-@app.on_event("startup")
 def start_document_sweeper() -> None:
     # Anything left from a previous run (crash, `docker restart`) is stale.
     remove_expired_documents(max_age=0)
@@ -488,7 +522,7 @@ def word_to_pdf(
     if file_extension not in {".doc", ".docx"}:
         raise HTTPException(status_code=400, detail="El archivo debe ser DOC o DOCX.")
 
-    soffice = shutil.which("soffice") or shutil.which("soffice.exe")
+    soffice = find_soffice()
     if not soffice:
         raise HTTPException(
             status_code=503,

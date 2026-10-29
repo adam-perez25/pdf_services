@@ -80,6 +80,11 @@ docker build -t pdf-toolkit .
 docker run --rm --name pdf-toolkit-web -p 8000:8000 pdf-toolkit
 ```
 
+La imagen incluye un `HEALTHCHECK` que consulta `/health` cada 30 segundos.
+`docker compose ps` muestra el contenedor como `healthy` cuando el servicio
+responde y puede guardar archivos temporales, y como `unhealthy` si deja de
+hacerlo.
+
 ## Ejecución local con Python
 
 1. Crea y activa un entorno virtual:
@@ -131,6 +136,7 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 
 | Método | Ruta | Descripción |
 | --- | --- | --- |
+| `GET` | `/health` | Estado del servicio: `storage` (puede guardar archivos temporales) y `libreoffice` (Word a PDF disponible). Responde `503` si no puede guardar archivos. |
 | `POST` | `/api/merge` | Une varios PDF recibidos como `files`. |
 | `POST` | `/api/pdf-info` | Devuelve el número de páginas de un PDF. |
 | `POST` | `/api/split` | Extrae un rango mediante `start_page` y `end_page`. |
@@ -157,6 +163,19 @@ La documentación interactiva generada por FastAPI está disponible en
 También se puede consultar el esquema OpenAPI en
 [`/openapi.json`](http://localhost:8000/openapi.json).
 
+## Pruebas
+
+Las pruebas usan [pytest](https://docs.pytest.org/) y llaman a la API sin
+levantar el servidor. Con el entorno virtual activado:
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest
+```
+
+La prueba de conversión de Word se omite automáticamente si LibreOffice no
+está instalado. Las pruebas no forman parte de la imagen de Docker.
+
 ## Estructura del proyecto
 
 ```text
@@ -166,7 +185,9 @@ static/               # JavaScript y estilos de la interfaz
 templates/            # Páginas HTML
 Dockerfile            # Imagen de producción
 docker-compose.yml    # Servicio para Docker Compose
+tests/                # Pruebas con pytest
 requirements.txt      # Dependencias de Python
+requirements-dev.txt  # Dependencias para ejecutar las pruebas
 ```
 
 ## Consideraciones de despliegue
