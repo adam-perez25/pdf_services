@@ -3,7 +3,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends libreoffice-writer fonts-liberation \
+	&& apt-get install -y --no-install-recommends libreoffice-writer fonts-liberation ghostscript \
 	&& rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

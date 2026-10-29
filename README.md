@@ -1,8 +1,8 @@
 # PDF Toolkit
 
 Aplicación web para trabajar con documentos desde el navegador. Permite unir y
-dividir archivos PDF, organizar sus páginas, convertir imágenes a PDF y
-transformar documentos Word en PDF.
+dividir archivos PDF, organizar sus páginas, comprimirlos, convertir imágenes
+a PDF y transformar documentos Word en PDF.
 
 La aplicación está construida con [FastAPI](https://fastapi.tiangolo.com/),
 [pypdf](https://pypi.org/project/pypdf/),
@@ -20,6 +20,10 @@ mismo servidor y no requiere un frontend independiente.
   con una página por imagen.
 - **Word a PDF:** convierte archivos `.doc` y `.docx` mediante LibreOffice en
   modo headless.
+- **Comprimir PDF:** reduce el tamaño bajando la resolución de las imágenes
+  mediante Ghostscript, ideal para documentos escaneados. Tres niveles: máxima
+  (72 ppp), recomendada (150 ppp) y alta calidad (300 ppp). Si el resultado no
+  es más pequeño, se descarga el original.
 - **Organizar páginas:** muestra una vista previa de cada página y permite
   girarlas, eliminarlas y reordenarlas (con los botones o arrastrándolas, también
   en pantallas táctiles manteniendo pulsada la página) antes de descargar el PDF
@@ -36,6 +40,8 @@ Para ejecutar el proyecto directamente:
 - Python 3.12 o una versión compatible con las dependencias del proyecto.
 - LibreOffice instalado y disponible en el `PATH` para usar la conversión de
   Word.
+- Ghostscript instalado y disponible en el `PATH` (`gs`, o `gswin64c` en
+  Windows) para usar la compresión.
 
 Para ejecutarlo con Docker:
 
@@ -46,7 +52,7 @@ Para ejecutarlo con Docker:
 ## Ejecución con Docker
 
 Docker Compose es la forma recomendada de ejecutar la aplicación porque
-instala también LibreOffice y evita configurar las dependencias del sistema
+instala también LibreOffice, Ghostscript y evita configurar las dependencias del sistema
 manualmente.
 
 1. Clona el repositorio y entra en su directorio:
@@ -137,13 +143,14 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 
 | Método | Ruta | Descripción |
 | --- | --- | --- |
-| `GET` | `/health` | Estado del servicio: `storage` (puede guardar archivos temporales) y `libreoffice` (Word a PDF disponible). Responde `503` si no puede guardar archivos. |
+| `GET` | `/health` | Estado del servicio: `storage` (puede guardar archivos temporales), `libreoffice` (Word a PDF disponible) y `ghostscript` (compresión disponible). Responde `503` si no puede guardar archivos. |
 | `POST` | `/api/merge` | Une varios PDF recibidos como `files`. |
 | `POST` | `/api/pdf-info` | Devuelve el número de páginas de un PDF. |
 | `POST` | `/api/split` | Extrae un rango mediante `start_page` y `end_page`. |
 | `POST` | `/api/split-zip` | Divide un PDF en una sola petición y devuelve un ZIP. `mode=pages` crea un PDF por página (`base_name`); `mode=ranges` usa `ranges` (`1-3, 4-6`) y la lista JSON `names`. Si solo resulta un archivo, devuelve el PDF directamente. |
 | `POST` | `/api/images-to-pdf` | Convierte las imágenes recibidas como `images`. |
 | `POST` | `/api/word-to-pdf` | Convierte un archivo `.doc` o `.docx`. |
+| `POST` | `/api/compress` | Comprime un PDF; `level` es `strong`, `recommended` (por defecto) o `high`. Las cabeceras `X-Original-Size`, `X-Compressed-Size` y `X-Compression-Applied` indican el resultado. |
 | `POST` | `/api/documents` | Sube un PDF una sola vez y devuelve su `id` y número de páginas. |
 | `GET` | `/api/documents/{id}/pages/{n}` | Devuelve la página `n` como JPEG; `width` controla el tamaño (100-2000 px). |
 | `POST` | `/api/documents/{id}/edit` | Genera el PDF editado a partir de `pages` sin volver a subir el archivo. |
@@ -175,8 +182,8 @@ python -m pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-La prueba de conversión de Word se omite automáticamente si LibreOffice no
-está instalado. Las pruebas no forman parte de la imagen de Docker.
+Las pruebas de conversión de Word y de compresión se omiten automáticamente si
+LibreOffice o Ghostscript no están instalados. Las pruebas no forman parte de la imagen de Docker.
 
 ## Estructura del proyecto
 
