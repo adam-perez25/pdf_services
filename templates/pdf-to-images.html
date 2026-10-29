@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PDF a imágenes | PDF Toolkit</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <main class="shell service-page">
+        <section class="intro">
+            <p class="eyebrow">SERVICIO 09 / PDF A IMÁGENES</p>
+            <h1>Convierte cada página<br><em>en una imagen.</em></h1>
+            <p class="lede">Descarga todas las páginas de un PDF como imágenes PNG o JPG.</p>
+        </section>
+
+        <nav class="service-back" aria-label="Navegación del servicio">
+            <a class="back-button" href="/">&#8592; Menu</a>
+        </nav>
+
+        <section class="workspace" aria-labelledby="pdf-images-title">
+            <div class="view-heading">
+                <h2 id="pdf-images-title">Documento PDF</h2>
+                <p class="view-lede">Se crea una imagen por página y se descargan juntas en un ZIP.</p>
+            </div>
+
+            <form id="pdf-images-form">
+                <label class="dropzone" for="pdf-images-input" id="pdf-images-dropzone">
+                    <span class="drop-icon">+</span>
+                    <span><strong>Seleccionar PDF</strong><small id="pdf-images-file-name">o arrástralo aquí</small></span>
+                    <input id="pdf-images-input" type="file" accept="application/pdf,.pdf">
+                </label>
+
+                <label class="name-field">
+                    <span>Formato de imagen</span>
+                    <select id="pdf-images-format">
+                        <option value="png" selected>PNG: sin pérdida, ideal para texto y gráficos</option>
+                        <option value="jpg">JPG: archivos más ligeros, ideal para fotos</option>
+                    </select>
+                </label>
+
+                <label class="name-field">
+                    <span>Resolución</span>
+                    <select id="pdf-images-dpi">
+                        <option value="72">Baja: 72 ppp</option>
+                        <option value="150" selected>Media: 150 ppp, buena para pantalla</option>
+                        <option value="300">Alta: 300 ppp, buena para imprimir</option>
+                    </select>
+                </label>
+
+                <label class="name-field">
+                    <span>Nombre base de las imágenes</span>
+                    <input id="pdf-images-base-name" type="text" value="pdf-images" maxlength="120" autocomplete="off">
+                </label>
+                <button class="primary-button" type="submit">
+                    <span>Convertir y descargar</span>
+                    <span aria-hidden="true">&#8594;</span>
+                </button>
+            </form>
+            <p id="pdf-images-status" class="status" role="status"></p>
+        </section>
+    </main>
+    <script src="/static/pdf-to-images.js"></script>
+</body>
+</html>
