@@ -18,31 +18,31 @@
             <a class="back-button" href="/">&#8592; Menu</a>
         </nav>
 
-        <section class="workspace" aria-labelledby="word-title">
+        <section class="workspace" aria-labelledby="office-title">
             <div class="view-heading">
-                <h2 id="word-title">Documento Word</h2>
+                <h2 id="office-title">Documento Word</h2>
                 <p class="view-lede">La conversión conserva el formato mediante LibreOffice.</p>
             </div>
 
-            <form id="word-form">
-                <label class="dropzone" for="word-input" id="word-dropzone">
+            <form id="office-form" data-endpoint="/api/word-to-pdf" data-extensions="doc,docx" data-default-name="document.pdf" data-missing-file="Selecciona un documento Word.">
+                <label class="dropzone" for="office-input" id="office-dropzone">
                     <span class="drop-icon">+</span>
-                    <span><strong>Seleccionar documento</strong><small id="word-file-name">o arrástralo aquí</small></span>
-                    <input id="word-input" type="file" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+                    <span><strong>Seleccionar documento</strong><small id="office-file-name">o arrástralo aquí</small></span>
+                    <input id="office-input" type="file" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
                 </label>
 
                 <label class="name-field">
                     <span>Nombre del PDF</span>
-                    <input id="word-output-name" type="text" value="document.pdf" maxlength="120" autocomplete="off">
+                    <input id="office-output-name" type="text" value="document.pdf" maxlength="120" autocomplete="off">
                 </label>
                 <button class="primary-button" type="submit">
                     <span>Convertir y descargar PDF</span>
                     <span aria-hidden="true">&#8594;</span>
                 </button>
             </form>
-            <p id="word-status" class="status" role="status"></p>
+            <p id="office-status" class="status" role="status"></p>
         </section>
     </main>
-    <script src="/static/word.js"></script>
+    <script src="/static/office.js"></script>
 </body>
 </html>
