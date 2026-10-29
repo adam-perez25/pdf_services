@@ -17,7 +17,8 @@ mismo servidor y no requiere un frontend independiente.
   personalizados con nombre propio. Todo se genera en una sola petición y se
   descarga como un único ZIP (o como PDF si solo resulta un archivo).
 - **Imágenes a PDF:** convierte varias imágenes ordenadas en un único PDF,
-  con una página por imagen.
+  con una página por imagen. Cada página se ajusta al tamaño A4 en la
+  orientación de la imagen; las imágenes pequeñas no se amplían.
 - **Word a PDF:** convierte archivos `.doc` y `.docx` mediante LibreOffice en
   modo headless.
 - **Comprimir PDF:** reduce el tamaño bajando la resolución de las imágenes
