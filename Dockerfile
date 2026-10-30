@@ -14,6 +14,12 @@ COPY app ./app
 COPY static ./static
 COPY templates ./templates
 
+# LibreOffice, Ghostscript and the PDF/image libraries parse untrusted uploads,
+# so the service runs as an unprivileged user instead of root. The code stays
+# owned by root and read-only; uploads only go to /tmp.
+RUN useradd --system --create-home --uid 10001 app
+USER app
+
 EXPOSE 8000
 
 # The slim image has no curl, so the check uses Python; a non-200 answer or no
