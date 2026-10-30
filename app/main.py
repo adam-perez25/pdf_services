@@ -60,6 +60,26 @@ async def revalidate_static_files(request, call_next):
     return response
 
 
+# Everything the pages load comes from this server; blob: covers the local
+# previews of selected images.
+SECURITY_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'self'; img-src 'self' blob:; object-src 'none'; "
+        "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+}
+
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.update(SECURITY_HEADERS)
+    return response
+
+
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return render_page("index.html")

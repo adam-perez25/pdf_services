@@ -158,7 +158,7 @@ function renderPages() {
         item.dataset.index = index;
         item.innerHTML = `
             <button class="page-thumb" type="button" aria-label="Ampliar página ${page.page}" data-label="pág. ${page.page}">
-                <img src="${pageImageUrl(page.page, THUMBNAIL_WIDTH)}" alt="Página ${page.page}" loading="lazy" style="transform: rotate(${page.rotation}deg)">
+                <img src="${pageImageUrl(page.page, THUMBNAIL_WIDTH)}" alt="Página ${page.page}" loading="lazy">
             </button>
             <div class="page-meta">
                 <span class="file-number">${String(index + 1).padStart(2, "0")}</span>
@@ -172,6 +172,8 @@ function renderPages() {
                 <button class="move-button" type="button" data-action="right" aria-label="Mover página ${page.page} después">&#8594;</button>
             </div>
         `;
+        // Set from script: the Content-Security-Policy blocks inline style attributes.
+        item.querySelector(".page-thumb img").style.transform = `rotate(${page.rotation}deg)`;
 
         item.querySelector(".page-thumb img").addEventListener("error", async (event) => {
             const thumb = event.target.parentElement;
