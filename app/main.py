@@ -235,7 +235,7 @@ def find_ghostscript() -> str | None:
     return shutil.which("gs") or shutil.which("gswin64c") or shutil.which("gswin32c")
 
 
-def run_tool(command: list[str], timeout: float) -> subprocess.CompletedProcess:
+def run_tool(command: list[str], timeout: float, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     """Run an external tool, and on timeout kill it with every process it started.
 
     soffice is only a launcher: the conversion runs in a soffice.bin child, which
@@ -248,6 +248,7 @@ def run_tool(command: list[str], timeout: float) -> subprocess.CompletedProcess:
         stderr=subprocess.PIPE,
         text=True,
         start_new_session=os.name == "posix",
+        env=env,
     )
     try:
         stdout, stderr = process.communicate(timeout=timeout)
@@ -1663,7 +1664,6 @@ OCR_MAX_PAGES = 200
 OCR_TIMEOUT_BASE_SECONDS = 60
 OCR_TIMEOUT_PER_PAGE_SECONDS = 20
 OCR_TIMEOUT_MAX_SECONDS = 1800
-OCR_EXIT_ALREADY_DONE = 6  # PriorOcrFoundError: the PDF already has text
 OCR_EXIT_ENCRYPTED = 8
 OCR_EXIT_MISSING_DEPENDENCY = 3
 OCR_EXIT_INVALID_CONFIG = 9  # e.g. a Tesseract language pack is missing
@@ -1684,6 +1684,29 @@ def ocr_available() -> bool:
 
 def ocr_timeout(page_count: int) -> float:
     return min(OCR_TIMEOUT_BASE_SECONDS + OCR_TIMEOUT_PER_PAGE_SECONDS * page_count, OCR_TIMEOUT_MAX_SECONDS)
+
+
+def ocr_command(language: str, input_path: Path, output_path: Path) -> list[str]:
+    return [
+        sys.executable,
+        "-m",
+        "ocrmypdf",
+        # Pages that already have text are copied as they are, so a
+        # half-scanned document (or one that needs no OCR) does not fail.
+        "--skip-text",
+        "-l",
+        language,
+        # A plain PDF: PDF/A conversion is slower and changes more.
+        "--output-type",
+        "pdf",
+        "--optimize",
+        "0",
+        "--jobs",
+        str(OCR_JOBS),
+        "--quiet",
+        str(input_path),
+        str(output_path),
+    ]
 
 
 @app.get("/ocr", response_class=HTMLResponse)
@@ -1734,33 +1757,14 @@ def ocr_pdf(
                 status_code=400,
                 detail=f"El OCR admite como máximo {OCR_MAX_PAGES} páginas por documento.",
             )
-        result = run_tool(
-            [
-                sys.executable,
-                "-m",
-                "ocrmypdf",
-                # Pages that already have text are copied as they are, so a
-                # half-scanned document does not fail.
-                "--skip-text",
-                "-l",
-                language,
-                # A plain PDF: PDF/A conversion is slower and changes more.
-                "--output-type",
-                "pdf",
-                "--optimize",
-                "0",
-                "--jobs",
-                str(OCR_JOBS),
-                "--quiet",
-                str(input_path),
-                str(output_path),
-            ],
-            timeout=ocr_timeout(page_count),
-        )
-        if result.returncode == OCR_EXIT_ALREADY_DONE:
-            raise HTTPException(
-                status_code=400,
-                detail="Este PDF ya tiene texto seleccionable; no hace falta aplicarle OCR.",
+        # ocrmypdf keeps rasterized pages and intermediate PDFs in a scratch
+        # folder under TMPDIR. A timeout kills it before it can clean up, so it
+        # gets a private folder that is removed here whatever happens.
+        with tempfile.TemporaryDirectory(prefix="pdf-toolkit-ocr-") as scratch:
+            result = run_tool(
+                ocr_command(language, input_path, output_path),
+                timeout=ocr_timeout(page_count),
+                env={**os.environ, "TMPDIR": scratch, "TEMP": scratch, "TMP": scratch},
             )
         if result.returncode == OCR_EXIT_ENCRYPTED:
             raise encrypted_pdf()

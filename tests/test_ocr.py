@@ -1,4 +1,5 @@
 from io import BytesIO
+import os
 import subprocess
 
 from PIL import Image, ImageDraw, ImageFont
@@ -159,14 +160,13 @@ def test_missing_ocrmypdf_is_reported(client, monkeypatch):
 @pytest.mark.parametrize(
     ("exit_code", "status", "detail"),
     [
-        (main.OCR_EXIT_ALREADY_DONE, 400, None),
         (main.OCR_EXIT_ENCRYPTED, 400, main.ENCRYPTED_PDF_MESSAGE),
         (main.OCR_EXIT_INVALID_CONFIG, 503, main.OCR_MISSING_MESSAGE),
         (15, 400, "No se pudo aplicar el OCR al PDF."),
     ],
 )
 def test_ocrmypdf_exit_codes(client, ocr_ready, monkeypatch, documents_dir, exit_code, status, detail):
-    def fake_run_tool(command, timeout):
+    def fake_run_tool(command, timeout, env=None):
         return subprocess.CompletedProcess(command, exit_code, "", "/secret/path traceback")
 
     monkeypatch.setattr(main, "run_tool", fake_run_tool)
@@ -183,8 +183,9 @@ def test_ocrmypdf_exit_codes(client, ocr_ready, monkeypatch, documents_dir, exit
 def test_timeout_is_reported(client, ocr_ready, monkeypatch, documents_dir):
     seen = {}
 
-    def slow_run_tool(command, timeout):
+    def slow_run_tool(command, timeout, env=None):
         seen["timeout"] = timeout
+        seen["tmpdir"] = env["TMPDIR"]
         raise subprocess.TimeoutExpired(command, timeout)
 
     monkeypatch.setattr(main, "run_tool", slow_run_tool)
@@ -194,6 +195,8 @@ def test_timeout_is_reported(client, ocr_ready, monkeypatch, documents_dir):
     assert response.status_code == 504
     assert seen["timeout"] == main.ocr_timeout(2)
     assert list(documents_dir.iterdir()) == []
+    # ocrmypdf's private scratch folder is removed even though it was killed.
+    assert not os.path.exists(seen["tmpdir"])
 
 
 def test_timeout_grows_with_pages_and_is_capped():
