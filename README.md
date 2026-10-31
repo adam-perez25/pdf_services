@@ -184,6 +184,9 @@ Cada herramienta tiene su propia página: `/` (inicio), `/merge`, `/split`,
 `/pages`, `/compress`, `/images`, `/pdf-to-images`, `/word`, `/excel` y
 `/powerpoint`.
 
+La interfaz tiene modo oscuro automático: sigue la preferencia de tema claro u
+oscuro del sistema operativo, sin necesidad de configurar nada.
+
 ## API
 
 Además de la interfaz web, el servidor ofrece estos endpoints:
