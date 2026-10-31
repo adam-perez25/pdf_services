@@ -1731,3 +1731,133 @@ def edit_metadata(
 @app.get("/workflow", response_class=HTMLResponse)
 async def workflow_page():
     return render_page("workflow.html")
+
+
+# Extract text (PDF to TXT). The text is streamed page by page into a file in
+# the documents folder, so a big document never becomes one huge string.
+TEXT_SEPARATORS = {"none", "formfeed", "header"}
+EMPTY_TEXT_MESSAGE = (
+    "No se encontró texto en el PDF. Probablemente es un documento escaneado: "
+    "pásalo primero por la herramienta OCR (/ocr) y vuelve a intentarlo."
+)
+
+
+@app.get("/extract-text", response_class=HTMLResponse)
+async def extract_text_page():
+    return render_page("extract-text.html")
+
+
+def clean_text_output_name(output_name: str, default: str) -> str:
+    """Like clean_output_name, but for a .txt file (same sanitisation rules)."""
+    name = clean_base_name(output_name, default)
+    if name.lower().endswith((".txt", ".pdf")):
+        name = name[:-4].strip(" .") or default
+    return f"{name}.txt"
+
+
+def normalize_text(text: str) -> str:
+    # pdfium ends lines with \r\n; NULs can appear in broken text layers.
+    return text.replace("\r\n", "\n").replace("\r", "\n").replace("\x00", "")
+
+
+def pdfium_page_text(document: pypdfium2.PdfDocument, index: int) -> str:
+    page = document[index]
+    try:
+        textpage = page.get_textpage()
+        try:
+            return normalize_text(textpage.get_text_range())
+        finally:
+            textpage.close()
+    finally:
+        page.close()
+
+
+@app.post("/api/extract-text")
+def extract_text(
+    file: UploadFile = File(...),
+    pages: str = Form(""),
+    page_separator: str = Form("header"),
+    output_name: str = Form(""),
+):
+    """Extract the text layer of a PDF as a UTF-8 .txt file.
+
+    pages uses the parse_page_ranges syntax ("1-3, 5"); empty means all pages.
+    page_separator: none, formfeed (a form feed between pages) or header
+    (a "--- Página N ---" line before each page).
+    """
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+    if page_separator not in TEXT_SEPARATORS:
+        raise HTTPException(status_code=400, detail="El separador de páginas no es válido.")
+    check_upload_sizes([file])
+
+    # Both files live in the documents folder, so the regular sweep removes
+    # them if the server stops halfway; normally they are deleted once sent.
+    DOCUMENTS_DIR.mkdir(exist_ok=True)
+    job_id = uuid.uuid4().hex
+    input_path = DOCUMENTS_DIR / f"{job_id}.in.pdf"
+    text_path = DOCUMENTS_DIR / f"{job_id}.txt"
+
+    def remove_job_files():
+        input_path.unlink(missing_ok=True)
+        text_path.unlink(missing_ok=True)
+
+    try:
+        with input_path.open("wb") as destination:
+            shutil.copyfileobj(file.file, destination)
+
+        character_count = 0
+        has_text = False
+        # pdfium is not thread-safe, so the whole extraction holds the lock.
+        with PDFIUM_LOCK:
+            document = open_pdfium_checked(input_path)
+            try:
+                page_count = len(document)
+                if pages.strip():
+                    numbers = [
+                        number
+                        for start, end in parse_page_ranges(pages, page_count)
+                        for number in range(start, end + 1)
+                    ]
+                else:
+                    numbers = list(range(1, page_count + 1))
+
+                with text_path.open("w", encoding="utf-8", newline="\n") as output:
+                    for position, number in enumerate(numbers):
+                        text = pdfium_page_text(document, number - 1).rstrip()
+                        character_count += len(text)
+                        has_text = has_text or bool(text.strip())
+                        if position:
+                            output.write("\n\f" if page_separator == "formfeed" else "\n\n")
+                        if page_separator == "header":
+                            output.write(f"--- Página {number} ---\n")
+                            if text:
+                                output.write("\n")
+                        output.write(text)
+                    output.write("\n")
+            finally:
+                document.close()
+
+        if not has_text:
+            raise HTTPException(status_code=400, detail=EMPTY_TEXT_MESSAGE)
+    except HTTPException:
+        remove_job_files()
+        raise
+    except Exception as error:
+        remove_job_files()
+        raise processing_error("No se pudo extraer el texto del PDF.", error) from error
+    finally:
+        file.file.close()
+
+    input_path.unlink(missing_ok=True)
+    filename = clean_text_output_name(output_name.strip() or Path(file.filename).stem, "texto")
+    return FileResponse(
+        text_path,
+        media_type="text/plain; charset=utf-8",
+        filename=filename,
+        headers={
+            "X-Page-Count": str(len(numbers)),
+            "X-Character-Count": str(character_count),
+        },
+        background=BackgroundTask(remove_job_files),
+    )
