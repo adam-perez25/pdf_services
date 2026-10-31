@@ -134,6 +134,82 @@ def test_failed_step_keeps_previous_result(client):
     assert PdfReader(BytesIO(protected)).is_encrypted
 
 
+def step_positions() -> dict[str, str | None]:
+    # id -> position of each STEP_DEFINITIONS entry, read from the source.
+    code = WORKFLOW_JS.read_text(encoding="utf-8")
+    body = code[code.index("const STEP_DEFINITIONS = ["):]
+    positions = {}
+    for chunk in re.split(r'\n    \{\n        id: "', body)[1:]:
+        step_id = chunk.split('"', 1)[0]
+        match = re.search(r'\n        position: "(\w+)"', chunk)
+        positions[step_id] = match.group(1) if match else None
+    return positions
+
+
+def test_step_order_is_enforced_by_position():
+    positions = step_positions()
+
+    assert positions == {
+        "ocr": "first",
+        "numbers": None,
+        "watermark": None,
+        "metadata": "late",
+        "compress": None,
+        "protect": "last",
+    }
+    code = WORKFLOW_JS.read_text(encoding="utf-8")
+    assert "last: true" not in code
+    # Moves only between steps of the same position group.
+    assert "return rank(steps[index].definition) === rank(steps[target].definition);" in code
+
+
+def test_page_explains_the_fixed_order():
+    html = WORKFLOW_HTML.read_text(encoding="utf-8")
+    assert "el OCR va siempre el primero" in html
+    assert "los metadatos casi al final" in html
+
+
+@needs_ghostscript
+def test_metadata_removed_last_survives_compress_and_ocr(client):
+    # The page's order: merge -> OCR (first) -> stamp -> compress -> metadata
+    # (late) -> protect (last). Ghostscript and ocrmypdf write their own
+    # Producer, dates and XMP, so they must come before the metadata step.
+    name = "informe-procesado.pdf"
+    merge = client.post(
+        "/api/merge",
+        files=[
+            ("files", ("informe.pdf", make_pdf_with_metadata(2), "application/pdf")),
+            ("files", ("anexo.pdf", make_pdf(1), "application/pdf")),
+        ],
+        data={"output_name": name},
+    )
+    assert merge.status_code == 200
+    result = merge.content
+    if main.ocr_available():
+        result = run_step(client, "/api/ocr", result, language="spa", output_name=name)
+    result = run_step(
+        client, "/api/stamp", result,
+        mode="numbers", position="bottom-center", number_format="n", start_number="1", font_size="12",
+        output_name=name,
+    )
+    compressed = client.post(
+        "/api/compress",
+        files={"file": ("informe.pdf", result, "application/pdf")},
+        data={"level": "recommended", "output_name": name},
+    )
+    assert compressed.status_code == 200
+    result = run_step(client, "/api/metadata", compressed.content, remove_all="true", output_name=name)
+    result = run_step(client, "/api/protect", result, password="clave", output_name=name)
+    unlocked = run_step(client, "/api/unlock", result, password="clave", output_name=name)
+
+    reader = PdfReader(BytesIO(unlocked))
+    assert len(reader.pages) == 3
+    info = reader.metadata or {}
+    assert not any(key in info for key in ("/Title", "/Author", "/Producer", "/Creator", "/CreationDate"))
+    assert "/Metadata" not in reader.trailer["/Root"]
+    assert b"Ghostscript" not in unlocked and b"ocrmypdf" not in unlocked.lower()
+
+
 @needs_ghostscript
 def test_chain_with_compress(client):
     result = run_step(

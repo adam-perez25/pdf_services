@@ -244,3 +244,88 @@ def test_requests_within_the_limit_pass_the_middleware(client):
     response = client.post("/api/pdf-info", files={"file": ("a.pdf", make_pdf(2), "application/pdf")})
 
     assert response.status_code == 200
+
+
+# --- Download names (Content-Disposition) -----------------------------------
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("informe.pdf", 'attachment; filename="informe.pdf"'),
+        ("mi informe.pdf", 'attachment; filename="mi informe.pdf"'),
+        ("Informe año ñ.pdf",
+         "attachment; filename=\"Informe ano n.pdf\"; filename*=UTF-8''Informe%20a%C3%B1o%20%C3%B1.pdf"),
+        ("日本.pdf", "attachment; filename=\"__.pdf\"; filename*=UTF-8''%E6%97%A5%E6%9C%AC.pdf"),
+    ],
+)
+def test_content_disposition_has_ascii_fallback_and_utf8_name(name, expected):
+    assert main.content_disposition(name) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Informe año ñ", "Informe año ñ"),
+        ("Ελληνικά-Кириллица_1", "Ελληνικά-Кириллица_1"),
+        ("Café", "Café"),  # decomposed accents are composed first
+        ('a<b>c:d"e|f?g*h', "a_b_c_d_e_f_g_h"),
+        ("../../etc/passwd", "passwd"),
+        ("bad\r\nSet-Cookie: x=1", "bad__Set-Cookie_ x_1"),
+        ("rtl‮txt.exe", "rtl_txt.exe"),
+        ("   ...   ", "fallback"),
+    ],
+)
+def test_clean_base_name_keeps_letters_of_any_alphabet(raw, expected):
+    assert main.clean_base_name(raw, "fallback") == expected
+
+
+@pytest.mark.parametrize(
+    "name",
+    ['x"; filename="evil.exe', "x\r\nX-Injected: 1", "x\\\";a", "ñ\r\nX-Injected: 1"],
+)
+def test_download_name_cannot_inject_headers(client, name):
+    response = client.post("/api/merge", files=[("files", ("a.pdf", make_pdf(1)))], data={"output_name": name})
+
+    assert response.status_code == 200
+    header = response.headers["content-disposition"]
+    assert "x-injected" not in response.headers
+    assert "\r" not in header and "\n" not in header
+    # Only the two quotes around the filename="..." value: no way out of it.
+    assert header.count('"') == 2
+    assert 'filename="evil.exe"' not in header
+
+
+# --- FastAPI validation errors -> Spanish 400 ---------------------------------
+
+@pytest.mark.parametrize(
+    ("url", "files", "data", "field"),
+    [
+        ("/api/pdf-to-images", {"file": ("a.pdf", make_pdf(1))}, {"dpi": "abc"}, "dpi"),
+        ("/api/split", {"file": ("a.pdf", make_pdf(1))}, {"start_page": "abc"}, "start_page"),
+        ("/api/merge", None, {"output_name": "x"}, "files"),
+        ("/api/metadata", {"file": ("a.pdf", make_pdf(1))}, {"remove_all": "maybe"}, "remove_all"),
+        ("/api/edit-pages", {"file": ("a.pdf", make_pdf(1))}, {}, "pages"),
+    ],
+)
+def test_validation_errors_are_spanish_400(client, url, files, data, field):
+    response = client.post(url, files=files, data=data)
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": f"Falta el campo «{field}» o su valor no es válido."}
+    # The handler runs inside the middlewares, so the headers are still set.
+    assert response.headers["x-frame-options"] == "DENY"
+    assert "content-security-policy" in response.headers
+
+
+def test_several_invalid_fields_are_all_named(client):
+    response = client.post("/api/split", data={"start_page": "abc"})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Faltan los campos «file», «start_page» o sus valores no son válidos."
+
+
+def test_validation_error_in_a_path_parameter(client):
+    response = client.get("/api/documents/" + "a" * 32 + "/pages/abc")
+
+    assert response.status_code == 400
+    assert "«page»" in response.json()["detail"]

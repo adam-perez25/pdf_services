@@ -88,7 +88,11 @@ function formatSize(bytes) {
 //   id, title          unique key and the label shown to the user
 //   endpoint           the existing /api endpoint that does the work
 //   working, failed    status text while running and the fallback error
-//   last: true         the step must stay at the end (nothing can follow it)
+//   position           where the step may go: "first" (right after the forced
+//                      merge), "late" (after the normal steps), "last" (at the
+//                      very end) or nothing (a normal step, any order). Steps
+//                      are kept sorted by position; the user only reorders
+//                      steps with the same position.
 //   build(container)   adds the option controls to container and returns
 //                      fill(formData), which appends the tool's form fields and
 //                      returns an error message (and focuses the field) when an
@@ -115,6 +119,10 @@ const STEP_DEFINITIONS = [
         endpoint: "/api/ocr",
         working: "Reconociendo el texto... puede tardar varios segundos por página.",
         failed: "No se pudo reconocer el texto.",
+        // ocrmypdf leaves the areas covered by existing text out of the OCR, so
+        // a watermark would hide part of the scan: OCR runs before anything
+        // that adds text to the pages.
+        position: "first",
         build(container) {
             const language = selectControl([
                 ["spa", "Español"],
@@ -123,7 +131,7 @@ const STEP_DEFINITIONS = [
             ], "spa");
             const hint = document.createElement("p");
             hint.className = "workflow-step-note";
-            hint.textContent = "Para documentos escaneados: añade el texto para poder buscarlo y copiarlo. Ponlo antes de numerar o de añadir una marca de agua.";
+            hint.textContent = "Para documentos escaneados: añade el texto para poder buscarlo y copiarlo. Siempre va el primero, antes de numerar o de añadir una marca de agua.";
             container.append(field("Idioma", language), hint);
             return (formData) => {
                 formData.append("language", language.value);
@@ -207,6 +215,9 @@ const STEP_DEFINITIONS = [
         endpoint: "/api/metadata",
         working: "Guardando los metadatos...",
         failed: "No se pudieron editar los metadatos.",
+        // Compress (Ghostscript) and OCR write their own producer, dates and
+        // XMP, so the metadata step runs after them, just before protect.
+        position: "late",
         build(container) {
             const removeAll = checkControl("Eliminar todos los metadatos");
             removeAll.input.checked = true;
@@ -230,7 +241,7 @@ const STEP_DEFINITIONS = [
             });
             const hint = document.createElement("p");
             hint.className = "workflow-step-note";
-            hint.textContent = "Si no marcas «Eliminar todos», los campos vacíos se borran del documento.";
+            hint.textContent = "Va siempre al final (antes de proteger), para que comprimir o el OCR no vuelvan a añadir metadatos. Si no marcas «Eliminar todos», los campos vacíos se borran del documento.";
             container.append(removeAll.label, fieldset, hint);
             return (formData) => {
                 formData.append("remove_all", removeAll.input.checked ? "true" : "false");
@@ -275,7 +286,7 @@ const STEP_DEFINITIONS = [
         endpoint: "/api/protect",
         working: "Protegiendo el PDF...",
         failed: "No se pudo proteger el PDF.",
-        last: true,
+        position: "last",
         build(container) {
             // The password only travels in the multipart body, never in a URL,
             // and is never logged.
@@ -465,15 +476,19 @@ function setStepState(step, state, note = "") {
     step.note.hidden = !note;
 }
 
-// A step can move up or down unless that would put anything after a "last" step.
+// Order of the position groups; steps without a position are "normal".
+const POSITION_RANK = { first: 0, normal: 1, late: 2, last: 3 };
+
+function rank(definition) {
+    return POSITION_RANK[definition.position || "normal"];
+}
+
+// A step can only swap places with a neighbour of the same position group, so
+// OCR stays first, metadata late and protect last whatever the user does.
 function canMove(index, offset) {
     const target = index + offset;
     if (target < 0 || target >= steps.length) return false;
-    const moving = steps[index].definition;
-    const other = steps[target].definition;
-    if (offset > 0 && other.last) return false;
-    if (offset < 0 && moving.last) return false;
-    return true;
+    return rank(steps[index].definition) === rank(steps[target].definition);
 }
 
 function moveStep(step, offset) {
@@ -497,10 +512,10 @@ function addStep(id) {
     const definition = STEP_DEFINITIONS.find((item) => item.id === id);
     if (!definition || running || steps.some((item) => item.definition.id === id)) return;
     const step = createStep(definition);
-    // New steps go before any step that must stay last.
-    const lastIndex = steps.findIndex((item) => item.definition.last);
-    if (definition.last || lastIndex === -1) steps.push(step);
-    else steps.splice(lastIndex, 0, step);
+    // A new step goes at the end of its position group.
+    const after = steps.findIndex((item) => rank(item.definition) > rank(definition));
+    if (after === -1) steps.push(step);
+    else steps.splice(after, 0, step);
     forgetLastResult();
     renderSteps();
 }

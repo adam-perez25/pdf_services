@@ -87,6 +87,92 @@ def test_split_rejects_invalid_range(client, sample_pdf, start, end):
     assert response.status_code == 400
 
 
+@pytest.mark.parametrize("data", [{"end_page": 0}, {"start_page": 0}, {"start_page": -1, "end_page": 2},
+                                  {"start_page": 2, "end_page": -1}])
+def test_split_zero_or_negative_pages_are_rejected(client, sample_pdf, data):
+    # end_page=0 used to mean "to the end"; only a missing end_page does now.
+    response = client.post("/api/split", files={"file": ("a.pdf", sample_pdf)}, data=data)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "El rango debe estar entre 1 y 4."
+
+
+@pytest.mark.parametrize("data", [{"start_page": 3}, {"start_page": 3, "end_page": ""}])
+def test_split_without_end_page_goes_to_the_last_page(client, sample_pdf, data):
+    response = client.post("/api/split", files={"file": ("a.pdf", sample_pdf)}, data=data)
+
+    assert response.status_code == 200
+    assert [width for width, _ in page_layout(response.content)] == [300, 400]
+
+
+def test_merge_error_has_spanish_accents(client):
+    response = client.post("/api/merge", files=[("files", ("notes.txt", b"hello"))])
+
+    assert response.json()["detail"] == "Todos los archivos deben tener extensión PDF."
+
+
+def test_merge_keeps_accents_in_the_download_name(client, sample_pdf):
+    response = client.post(
+        "/api/merge",
+        files=[("files", ("a.pdf", sample_pdf))],
+        data={"output_name": "Informe año ñ.pdf"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == (
+        "attachment; filename=\"Informe ano n.pdf\"; filename*=UTF-8''Informe%20a%C3%B1o%20%C3%B1.pdf"
+    )
+
+
+@pytest.mark.parametrize(
+    "pages",
+    [
+        [{"page": 1.7}],
+        [{"page": True}],
+        [{"page": "1"}],
+        [{"page": 1, "rotation": 90.5}],
+        [{"page": 1, "rotation": False}],
+        [1],
+    ],
+)
+def test_edit_pages_requires_whole_numbers(client, sample_pdf, pages):
+    response = client.post(
+        "/api/edit-pages", files={"file": ("a.pdf", sample_pdf)}, data={"pages": json.dumps(pages)}
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "La lista de páginas no es válida."
+
+
+def test_edit_pages_rejects_deeply_nested_json(client, sample_pdf):
+    response = client.post(
+        "/api/edit-pages", files={"file": ("a.pdf", sample_pdf)}, data={"pages": "[" * 100_000 + "]" * 100_000}
+    )
+
+    assert response.status_code == 400
+
+
+def test_edit_pages_writes_rotation_modulo_360(client):
+    from pypdf import PdfReader, PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(100, 200).rotation = 270
+    writer.add_blank_page(100, 200)
+    source = BytesIO()
+    writer.write(source)
+
+    response = client.post(
+        "/api/edit-pages",
+        files={"file": ("a.pdf", source.getvalue())},
+        data={"pages": json.dumps([{"page": 1, "rotation": 90}, {"page": 2, "rotation": 450}])},
+    )
+
+    assert response.status_code == 200
+    pages = PdfReader(BytesIO(response.content)).pages
+    assert pages[0].get("/Rotate", 0) == 0  # 270 + 90 = 360 is written as 0
+    assert pages[1]["/Rotate"] == 90
+
+
 def test_images_to_pdf_one_page_per_image(client):
     response = client.post(
         "/api/images-to-pdf",

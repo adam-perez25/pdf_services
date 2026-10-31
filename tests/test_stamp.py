@@ -1,3 +1,4 @@
+import math
 import re
 from io import BytesIO
 
@@ -205,3 +206,56 @@ def test_huge_number_font_fits_short_page():
     stream = main.number_stream("7", 72, "top-center", 300.0, 60.0)
     size, _, y = (float(v) for v in re.search(r"/StampFont (\S+) Tf 0 g (\S+) (\S+) Td", stream).groups())
     assert y >= 0 and y + size * 0.718 <= 60.0
+
+
+@pytest.mark.parametrize("position", ["bottom-center", "top-center"])
+def test_descenders_are_not_clipped_on_short_pages(position):
+    # "Página" has a descender (g); on a 40 pt strip the whole glyph box,
+    # from the descender to the cap height, must stay on the page.
+    stream = main.number_stream("Página 1 de 9", 72, position, 600.0, 40.0)
+    size, _, y = (float(v) for v in re.search(r"/StampFont (\S+) Tf 0 g (\S+) (\S+) Td", stream).groups())
+    assert y - size * main.HELVETICA_DESCENDER >= -0.01
+    assert y + size * main.HELVETICA_CAP_HEIGHT <= 40.01
+
+
+def test_rendered_descender_stays_on_a_short_page(client):
+    writer = PdfWriter()
+    writer.add_blank_page(400, 30)
+    source = BytesIO()
+    writer.write(source)
+
+    response = stamp(client, source.getvalue(), mode="numbers", number_format="page-n-of-total", font_size="72")
+
+    assert response.status_code == 200
+    _, top, _, bottom = ink_box(response.content, 0)
+    # Ink must not touch the bottom edge (a clipped "g" would reach it).
+    assert bottom < 0.97 and top > 0.03
+
+
+@pytest.mark.parametrize(("rotation", "width", "height"), [(0, 600, 40), (45, 600, 60), (45, 60, 600)])
+def test_watermark_fits_the_page_height_too(rotation, width, height):
+    text = "BORRADOR"
+    stream = main.watermark_stream(text, 200, rotation, width, height)
+    size = float(re.search(r"/StampFont (\S+) Tf", stream).group(1))
+    angle = math.radians(rotation)
+    text_width = main.helvetica_width(text, size)
+    text_height = size * (main.HELVETICA_CAP_HEIGHT + main.HELVETICA_DESCENDER)
+    box_width = text_width * math.cos(angle) + text_height * math.sin(angle)
+    box_height = text_width * math.sin(angle) + text_height * math.cos(angle)
+    assert box_width <= 0.9 * width + 0.01
+    assert box_height <= 0.9 * height + 0.01
+
+
+@pytest.mark.parametrize("rotation", ["45.0", "0.0", "45,0"])
+def test_decimal_rotation_is_accepted(client, sample_pdf, rotation):
+    response = stamp(client, sample_pdf, mode="watermark", text="Hola", rotation=rotation)
+
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("rotation", ["30", "90", "45.5", "abc", "-45"])
+def test_other_rotations_get_a_clear_message(client, sample_pdf, rotation):
+    response = stamp(client, sample_pdf, mode="watermark", text="Hola", rotation=rotation)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "La rotación debe ser 0 o 45 grados."

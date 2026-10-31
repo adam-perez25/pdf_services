@@ -233,3 +233,147 @@ def test_long_ocr_survives_a_sweep(client, ocr_ready, monkeypatch, documents_dir
 def test_ocr_limits_allow_big_scans():
     assert main.OCR_MAX_PAGES >= 1000
     assert main.ocr_timeout(500) > 60 * 60
+
+
+def make_mixed_pdf() -> bytes:
+    # Page 1 digital (no image), pages 2 and 3 scans: only they have images.
+    writer = PdfWriter()
+    writer.add_blank_page(300, 300)
+    for page in PdfReader(BytesIO(make_image_only_pdf(["NUMERADO", "ESCANEADO"]))).pages:
+        writer.add_page(page)
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+def stamped(client, content: bytes) -> bytes:
+    # As if it went through Numerar páginas first: the page has a little text.
+    response = client.post("/api/stamp", files={"file": ("a.pdf", content)}, data={"mode": "numbers"})
+    assert response.status_code == 200
+    return response.content
+
+
+def capture_command(monkeypatch) -> dict:
+    seen = {}
+
+    def fake_run_tool(command, timeout, env=None):
+        seen["command"] = command
+        Path(command[-1]).write_bytes(Path(command[-2]).read_bytes())
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(main, "run_tool", fake_run_tool)
+    return seen
+
+
+def test_page_list_compresses_ranges():
+    assert main.page_list([1, 2, 3, 5, 7, 8]) == "1-3,5,7-8"
+    assert main.page_list([4]) == "4"
+    assert main.page_list([]) == ""
+
+
+def test_only_pages_with_images_are_redone(client, ocr_ready, monkeypatch, documents_dir):
+    seen = capture_command(monkeypatch)
+
+    response = ocr(client, make_mixed_pdf())
+
+    assert response.status_code == 200
+    command = seen["command"]
+    assert "--redo-ocr" in command and "--skip-text" not in command
+    assert command[command.index("--pages") + 1] == "2-3"
+    assert "--rotate-pages" in command
+    assert list(documents_dir.iterdir()) == []
+
+
+def test_digital_pdf_is_skipped_not_redone(client, ocr_ready, monkeypatch):
+    seen = capture_command(monkeypatch)
+    # conftest's make_pdf pages are Pillow images, so build image-free pages.
+    writer = PdfWriter()
+    for _ in range(3):
+        writer.add_blank_page(300, 300)
+    digital = BytesIO()
+    writer.write(digital)
+
+    response = ocr(client, digital.getvalue())
+
+    assert response.status_code == 200
+    command = seen["command"]
+    assert "--skip-text" in command
+    assert "--redo-ocr" not in command and "--pages" not in command
+    assert "--rotate-pages" in command
+
+
+def test_pdf_with_form_fields_falls_back_to_skip_text(client, ocr_ready, monkeypatch):
+    # ocrmypdf refuses --redo-ocr on fillable forms.
+    from pypdf.generic import ArrayObject, DictionaryObject, NameObject
+
+    writer = PdfWriter(clone_from=PdfReader(BytesIO(make_image_only_pdf(["FORMULARIO"]))))
+    field = writer._add_object(DictionaryObject({NameObject("/FT"): NameObject("/Tx")}))
+    writer._root_object[NameObject("/AcroForm")] = DictionaryObject({NameObject("/Fields"): ArrayObject([field])})
+    output = BytesIO()
+    writer.write(output)
+    seen = capture_command(monkeypatch)
+
+    response = ocr(client, output.getvalue())
+
+    assert response.status_code == 200
+    assert "--skip-text" in seen["command"] and "--redo-ocr" not in seen["command"]
+
+
+def test_unicode_download_name(client, ocr_ready, monkeypatch):
+    capture_command(monkeypatch)
+
+    response = ocr(client, make_pdf(1), filename="Escáner año.pdf")
+
+    assert response.headers["content-disposition"] == (
+        "attachment; filename=\"Escaner ano-ocr.pdf\"; filename*=UTF-8''Esc%C3%A1ner%20a%C3%B1o-ocr.pdf"
+    )
+
+
+@needs_tesseract
+def test_scanned_page_with_a_stamped_number_is_ocred(client):
+    # --skip-text used to leave such a page alone because it already had text.
+    original = stamped(client, make_image_only_pdf(["PRESUPUESTO"]))
+    assert "PRESUPUESTO" not in extracted_text(original)
+
+    response = ocr(client, original)
+
+    assert response.status_code == 200
+    assert extracted_text(response.content).count("PRESUPUESTO") == 1
+
+
+@needs_tesseract
+@pytest.mark.parametrize("angle", [90, 180])
+def test_sideways_and_upside_down_scans_are_read(client, angle):
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", 48)
+    except OSError:
+        pytest.skip("Liberation Sans is needed for a reliable orientation test")
+    page = Image.new("RGB", (1654, 2339), "white")
+    draw = ImageDraw.Draw(page)
+    # Orientation detection needs a page with a fair amount of text.
+    for line in range(20):
+        draw.text((150, 200 + line * 90), f"El presupuesto anual de la biblioteca {line}", fill="black", font=font)
+    output = BytesIO()
+    page.rotate(angle, expand=True).save(output, format="PDF", resolution=200)
+
+    response = ocr(client, output.getvalue())
+
+    assert response.status_code == 200
+    assert "PRESUPUESTO" in extracted_text(response.content)
+
+
+@needs_tesseract
+def test_digital_text_is_kept_and_not_duplicated(client):
+    writer = PdfWriter()
+    for _ in range(2):
+        writer.add_blank_page(300, 300)
+    digital = BytesIO()
+    writer.write(digital)
+    text_page = stamped(client, digital.getvalue())
+    before = extracted_text(text_page)
+    assert before
+
+    response = ocr(client, text_page)
+
+    assert response.status_code == 200
+    assert extracted_text(response.content) == before

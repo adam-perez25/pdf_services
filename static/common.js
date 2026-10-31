@@ -106,8 +106,15 @@ async function errorMessage(response, fallback) {
 function downloadName(response) {
     // Names with spaces or accents arrive encoded as filename*=utf-8''...
     const header = response.headers.get("Content-Disposition") || "";
+    // filename* (RFC 6266) is preferred; filename="..." is only the ASCII fallback.
     const encoded = header.match(/filename\*=utf-8''([^;]+)/i);
-    if (encoded) return decodeURIComponent(encoded[1]);
+    if (encoded) {
+        try {
+            return decodeURIComponent(encoded[1].trim());
+        } catch {
+            // A malformed encoding falls back to the plain name below.
+        }
+    }
     const plain = header.match(/filename="([^"]+)"/);
     return plain ? plain[1] : null;
 }

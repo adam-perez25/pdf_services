@@ -307,3 +307,35 @@ def test_waiting_organizer_save_keeps_its_document(client, documents_dir, monkey
 
     assert response.status_code == 200
     assert seen["protected"] is True
+
+
+def test_big_jobs_return_freed_memory_with_malloc_trim(monkeypatch):
+    trims = []
+    monkeypatch.setattr(main, "MALLOC_TRIM", lambda pad: trims.append(pad) or 1)
+    monkeypatch.setattr(main, "MALLOC_TRIM_DELAY_SECONDS", 0.01)
+
+    with main.heavy_job(main.HEAVY_JOB_MIN_MB - 1):
+        pass
+    time.sleep(0.1)
+    assert trims == []  # small jobs never trim
+
+    with main.heavy_job(main.HEAVY_JOB_MIN_MB):
+        pass
+    with main.heavy_job(main.HEAVY_JOB_MIN_MB):
+        pass
+    wait_until(lambda: trims)
+    time.sleep(0.1)
+    assert trims == [0]  # two jobs ending together share one trim
+
+
+def test_malloc_trim_is_optional(monkeypatch):
+    # Windows and musl have no malloc_trim: releasing does nothing.
+    monkeypatch.setattr(main, "MALLOC_TRIM", None)
+    with main.heavy_job(main.HEAVY_JOB_MIN_MB):
+        pass
+    assert main.release_free_memory() is None
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="glibc only")
+def test_malloc_trim_is_found_on_glibc():
+    assert main.MALLOC_TRIM is not None

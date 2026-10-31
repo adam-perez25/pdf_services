@@ -4,7 +4,7 @@ WORKDIR /app
 
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends libreoffice-writer libreoffice-calc libreoffice-impress fonts-liberation ghostscript \
-		tesseract-ocr tesseract-ocr-spa tesseract-ocr-eng \
+		tesseract-ocr tesseract-ocr-spa tesseract-ocr-eng tesseract-ocr-osd \
 	&& rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
