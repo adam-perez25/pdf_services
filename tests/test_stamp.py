@@ -1,9 +1,11 @@
+import re
 from io import BytesIO
 
 import pypdfium2
 from pypdf import PdfReader, PdfWriter
 import pytest
 
+import app.main as main
 from conftest import make_pdf
 
 
@@ -182,3 +184,24 @@ def test_page_route(client):
 
     assert response.status_code == 200
     assert "/static/stamp.js" in response.text
+
+
+@pytest.mark.parametrize("position", sorted(main.STAMP_POSITIONS))
+def test_long_page_numbers_stay_inside_narrow_pages(position):
+    # "Página 100000 de 100099" at 72 pt is far wider than a 120 pt page.
+    label = "Página 100000 de 100099"
+    width, height = 120.0, 400.0
+    stream = main.number_stream(label, 72, position, width, height)
+
+    size, x, y = (float(v) for v in re.search(r"/StampFont (\S+) Tf 0 g (\S+) (\S+) Td", stream).groups())
+    margin = min(main.STAMP_MARGIN, min(width, height) * 0.08)
+    assert size < 72
+    assert x >= margin - 0.01
+    assert x + main.helvetica_width(label, size) <= width - margin + 0.01
+    assert margin - 0.01 <= y <= height - margin - size * 0.718 + 0.01
+
+
+def test_huge_number_font_fits_short_page():
+    stream = main.number_stream("7", 72, "top-center", 300.0, 60.0)
+    size, _, y = (float(v) for v in re.search(r"/StampFont (\S+) Tf 0 g (\S+) (\S+) Td", stream).groups())
+    assert y >= 0 and y + size * 0.718 <= 60.0

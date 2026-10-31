@@ -139,3 +139,20 @@ def test_non_pdf_is_rejected(client):
 def test_corrupt_pdf_is_rejected(client):
     assert read(client, b"%PDF-1.4 not really a pdf").status_code == 400
     assert edit(client, b"%PDF-1.4 not really a pdf").status_code == 400
+
+
+def test_custom_info_entries_are_removed_on_edit(client):
+    writer = PdfWriter(clone_from=PdfReader(BytesIO(make_pdf_with_metadata())))
+    writer.add_metadata({"/Custom": "cuenta-secreta-1234", "/Trapped": "/False"})
+    source = BytesIO()
+    writer.write(source)
+
+    response = edit(client, source.getvalue(), title="Nuevo")
+
+    assert response.status_code == 200
+    metadata = PdfReader(BytesIO(response.content)).metadata
+    assert "/Custom" not in metadata
+    assert b"cuenta-secreta-1234" not in response.content
+    assert metadata["/Title"] == "Nuevo"
+    assert metadata["/Creator"] == "Writer"
+    assert "/Trapped" in metadata

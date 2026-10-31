@@ -40,6 +40,8 @@ MAX_RENDER_WIDTH = 2000
 # Upload limits: per file, and for all the files of one request (merge, images).
 MAX_UPLOAD_MB = 50
 MAX_TOTAL_UPLOAD_MB = 200
+# Extra room in a request for the multipart boundaries and the text fields.
+MULTIPART_OVERHEAD_MB = 1
 logger = logging.getLogger("uvicorn.error")
 
 
@@ -50,6 +52,58 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Unir PDF", lifespan=lifespan)
+
+
+def max_request_bytes() -> int:
+    return int((MAX_TOTAL_UPLOAD_MB + MULTIPART_OVERHEAD_MB) * 1024 * 1024)
+
+
+def request_too_big() -> str:
+    return f"La petición supera el límite de {MAX_TOTAL_UPLOAD_MB} MB."
+
+
+class UploadSizeLimit:
+    """Stop oversized uploads before they are written to temporary files.
+
+    The per-file checks in the handlers only run once Starlette has received
+    and spooled the whole body, so this rejects a too-big Content-Length up
+    front and cuts off bodies without one (chunked) as soon as they pass the
+    limit, instead of filling the temp disk first.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["method"] != "POST" or not scope["path"].startswith("/api/"):
+            await self.app(scope, receive, send)
+            return
+        limit = max_request_bytes()
+        length = dict(scope["headers"]).get(b"content-length", b"")
+        if length.isdigit() and int(length) > limit:
+            response = JSONResponse({"detail": request_too_big()}, status_code=413)
+            await response(scope, receive, send)
+            return
+
+        received = 0
+
+        async def limited_receive():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > limit:
+                    # FastAPI re-raises HTTPException from body parsing, so
+                    # this becomes a normal 413 response.
+                    raise HTTPException(status_code=413, detail=request_too_big())
+            return message
+
+        await self.app(scope, limited_receive, send)
+
+
+# Added before the decorator middlewares below, so it runs inside them and
+# its 413 still gets the security headers.
+app.add_middleware(UploadSizeLimit)
 # The slim image's MIME table has no entry for .woff2, so the bundled fonts
 # would otherwise be served as text/plain.
 mimetypes.add_type("font/woff2", ".woff2")
@@ -1303,8 +1357,15 @@ def visible_page_box(page: PageObject) -> tuple[list[str], float, float]:
 
 
 def number_stream(text: str, size: float, position: str, width: float, height: float) -> str:
-    text_width = helvetica_width(text, size)
     margin = min(STAMP_MARGIN, min(width, height) * 0.08)
+    # Shrink the label if it would run off the page (long labels, big font,
+    # narrow page): it must fit between the margins, across and up.
+    size = min(size, (height - 2 * margin) / 0.718)
+    text_width = helvetica_width(text, size)
+    room = width - 2 * margin
+    if text_width > room:
+        size *= room / text_width
+        text_width = room
     vertical, horizontal = position.split("-")
     if horizontal == "left":
         x = margin
@@ -1454,6 +1515,10 @@ def stamp_pdf(
     )
 
 
+# /Info entries kept on an edit besides the editable fields. Anything else
+# (custom keys written by other programs) is removed, since it can carry
+# private data the form does not show.
+METADATA_KEPT_KEYS = {"/Creator", "/Producer", "/CreationDate", "/ModDate", "/Trapped"}
 # Editable document properties: form field -> /Info key.
 METADATA_FIELDS = {
     "title": "/Title",
@@ -1551,6 +1616,10 @@ def edit_metadata(
             if writer._info is None:
                 writer.metadata = {}
             info = writer._info.get_object()
+            editable = set(METADATA_FIELDS.values())
+            for key in list(info.keys()):
+                if key not in editable and key not in METADATA_KEPT_KEYS:
+                    del info[key]
             for field, value in values.items():
                 key = METADATA_FIELDS[field]
                 if value.strip():
