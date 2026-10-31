@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Flujo de trabajo | PDF Toolkit</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <main class="shell service-page">
+        <section class="intro">
+            <p class="eyebrow">SERVICIO 16 / FLUJO DE TRABAJO</p>
+            <h1>Varias herramientas<br><em>de una sola vez.</em></h1>
+            <p class="lede">Encadena pasos (unir, numerar, borrar metadatos, comprimir, proteger) y descarga solo el resultado final.</p>
+        </section>
+
+        <nav class="service-back" aria-label="Navegación del servicio">
+            <a class="back-button" href="/">&#8592; Menu</a>
+        </nav>
+
+        <section class="workspace" aria-labelledby="workflow-files-title">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">01 / DOCUMENTOS</p>
+                    <h2 id="workflow-files-title">Tu selección</h2>
+                </div>
+                <span id="workflow-file-count" class="counter">0 archivos</span>
+            </div>
+
+            <label class="dropzone" for="workflow-input" id="workflow-dropzone">
+                <span class="drop-icon">+</span>
+                <span><strong>Seleccionar PDFs</strong><small>o arrástralos aquí. Si eliges varios, el primer paso será unirlos.</small></span>
+                <input id="workflow-input" type="file" accept="application/pdf,.pdf" multiple>
+            </label>
+
+            <div id="workflow-empty-files" class="empty-state">Todavía no has seleccionado ningún archivo.</div>
+            <ol id="workflow-files" class="file-list" aria-live="polite"></ol>
+
+            <form id="workflow-form" novalidate>
+                <div class="section-heading output-heading">
+                    <div>
+                        <p class="eyebrow">02 / PASOS</p>
+                        <h2>Qué hacer y en qué orden</h2>
+                    </div>
+                    <span id="workflow-step-count" class="counter">0 pasos</span>
+                </div>
+                <p class="view-lede">Cada paso usa el resultado del anterior. «Proteger con contraseña» siempre va al final, porque después ya no se puede modificar el PDF.</p>
+
+                <div id="workflow-empty-steps" class="empty-state workflow-empty-steps">Añade al menos un paso.</div>
+                <ol id="workflow-steps" class="workflow-steps" aria-live="polite"></ol>
+
+                <div class="workflow-add">
+                    <label class="name-field">
+                        <span>Añadir paso</span>
+                        <select id="workflow-add-select"></select>
+                    </label>
+                    <button id="workflow-add-button" class="tool-button" type="button">Añadir</button>
+                </div>
+
+                <div class="section-heading output-heading">
+                    <div>
+                        <p class="eyebrow">03 / EXPORTAR</p>
+                        <h2>Nombre del resultado</h2>
+                    </div>
+                </div>
+
+                <label class="name-field">
+                    <span>Nombre del PDF</span>
+                    <input id="workflow-output-name" type="text" value="documento-procesado.pdf" maxlength="120" autocomplete="off">
+                </label>
+                <button id="workflow-submit" class="primary-button" type="submit">
+                    <span>Ejecutar y descargar</span>
+                    <span aria-hidden="true">&#8594;</span>
+                </button>
+            </form>
+            <p id="workflow-status" class="status" role="status"></p>
+            <div id="workflow-fallback" class="workflow-fallback" hidden>
+                <button id="workflow-fallback-button" class="tool-button" type="button">Descargar el último resultado intermedio</button>
+            </div>
+        </section>
+    </main>
+    <script src="/static/common.js"></script>
+    <script src="/static/workflow.js"></script>
+</body>
+</html>

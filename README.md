@@ -55,6 +55,13 @@ mismo servidor y no requiere un frontend independiente.
   en pantallas táctiles manteniendo pulsada la página) antes de descargar el PDF
   resultante.
   Al pulsar una página se abre una vista ampliada en alta resolución.
+- **Flujo de trabajo:** encadena varias herramientas de una sola vez (por
+  ejemplo unir, numerar páginas, borrar metadatos, comprimir y proteger) y
+  descarga solo el resultado final. Si se eligen varios PDFs, el primer paso es
+  siempre unirlos; «Proteger con contraseña» va siempre al final. El navegador
+  llama uno tras otro a los mismos endpoints de la API, así que cada paso
+  aplica sus propias validaciones y límites; si un paso falla, se muestra su
+  error y se puede descargar el resultado del último paso correcto.
 
 Los archivos se procesan durante la solicitud y se devuelven como descargas.
 La aplicación no incluye almacenamiento permanente de documentos.
@@ -230,7 +237,8 @@ de Docker.
 
 Cada herramienta tiene su propia página: `/` (inicio), `/merge`, `/split`,
 `/pages`, `/compress`, `/metadata`, `/protect`, `/images`, `/pdf-to-images`, `/stamp`, `/word`,
-`/excel` y `/powerpoint`.
+`/excel`, `/powerpoint` y `/workflow` (flujo de trabajo, que no tiene endpoint
+propio: encadena los de las demás herramientas desde el navegador).
 
 La interfaz tiene modo oscuro automático: sigue la preferencia de tema claro u
 oscuro del sistema operativo, sin necesidad de configurar nada.

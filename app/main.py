@@ -1724,3 +1724,10 @@ def edit_metadata(
     else:
         filename = clean_output_name(clean_base_name(Path(file.filename).stem, "documento") + "-metadatos")
     return file_download(output_path, filename)
+
+
+# Flujo de trabajo: the chaining runs in the browser (static/workflow.js), which
+# calls the existing /api endpoints one after another, so only the page lives here.
+@app.get("/workflow", response_class=HTMLResponse)
+async def workflow_page():
+    return render_page("workflow.html")
