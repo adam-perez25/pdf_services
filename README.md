@@ -289,6 +289,14 @@ Otros valores fijos, definidos como constantes en `app/main.py`:
 | `HEAVY_JOB_MIN_MB` | 100 MB | Los trabajos con una estimación menor no reservan memoria ni esperan turno. |
 | `HEAVY_JOB_SMALL_FILES_MB` | 50 MB | Los trabajos sobre archivos que suman menos que esto no esperan turno en ninguna herramienta. |
 | `HEAVY_JOB_RETRY_AFTER_SECONDS` | 60 s | Valor de `Retry-After` cuando el servidor está ocupado. |
+| `DECODED_BYTES_PER_PIXEL` | 8 | Memoria por píxel con la que se estima la decodificación de una imagen (**Imágenes a PDF**, **Firmar PDF**). Cuenta aunque el archivo sea pequeño, así que una imagen muy comprimida pero enorme espera su turno como un trabajo grande. |
+| `IMAGE_MAX_PIXELS` | 100 000 000 | Píxeles máximos de cada imagen subida (**Imágenes a PDF**, **Firmar PDF**). Se leen de la cabecera antes de decodificarla; si se supera responde `400`. También es el límite antibomba de Pillow (su aviso se trata como error). |
+| `PAGE_SELECTION_MAX_LENGTH` | 1000 | Longitud máxima del texto de páginas (`pages`) de **PDF a imágenes** y **Extraer texto**. |
+| `PAGE_LIST_FACTOR` / `PAGE_LIST_MIN_LIMIT` | 10 / 100 | Las listas de páginas que pueden repetir páginas (rangos de **Extraer texto** y de **Dividir** en ZIP, lista de **Organizar páginas**) suman como máximo 10 veces las páginas del PDF, y nunca menos de 100; si se supera responde `400`. |
+| `SPLIT_MAX_RANGES` | 500 | Rangos máximos de `/api/split-zip` en modo `ranges`. |
+| `THUMBNAIL_MAX_PIXELS` / `THUMBNAIL_MAX_SIDE` | 8 000 000 / 16 000 px | Tope de las miniaturas de **Organizar páginas** y **Firmar PDF**: una página enorme (por ejemplo 500 × 200 000 pt) se dibuja más pequeña. |
+| `PDF_HEADER_SEARCH_BYTES` | 1024 | **Comprimir PDF** y **OCR** exigen la cabecera `%PDF-` en los primeros bytes; lo que haya delante se elimina antes de pasar el archivo a Ghostscript u OCRmyPDF, y sin cabecera responde `400`. |
+| `MAX_OUTPUT_NAME_LENGTH` | 150 | Caracteres máximos del nombre de descarga (`output_name`, `base_name`), sin contar la extensión. |
 
 Si una conversión, compresión u OCR supera su tiempo máximo, se termina el proceso
 externo junto con todos los procesos que haya iniciado. La limpieza periódica
@@ -318,8 +326,8 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 | `POST` | `/api/merge` | Une varios PDF recibidos como `files`. |
 | `POST` | `/api/pdf-info` | Devuelve el número de páginas de un PDF. |
 | `POST` | `/api/split` | Extrae un rango mediante `start_page` y `end_page`. |
-| `POST` | `/api/split-zip` | Divide un PDF en una sola petición y devuelve un ZIP. `mode=pages` crea un PDF por página (`base_name`); `mode=ranges` usa `ranges` (`1-3, 4-6`) y la lista JSON `names`. Si solo resulta un archivo, devuelve el PDF directamente. |
-| `POST` | `/api/images-to-pdf` | Convierte las imágenes recibidas como `images`. |
+| `POST` | `/api/split-zip` | Divide un PDF en una sola petición y devuelve un ZIP. `mode=pages` crea un PDF por página (`base_name`); `mode=ranges` usa `ranges` (`1-3, 4-6`; hasta 500 rangos que sumen como máximo 10 veces las páginas del PDF, mínimo 100) y la lista JSON `names`. Si solo resulta un archivo, devuelve el PDF directamente. |
+| `POST` | `/api/images-to-pdf` | Convierte las imágenes recibidas como `images`. Cada imagen puede tener como máximo `IMAGE_MAX_PIXELS` (100 millones de píxeles). |
 | `POST` | `/api/pdf-to-images` | Convierte cada página de un PDF en una imagen; `image_format` es `png` (por defecto) o `jpg`, `dpi` es `72`, `150` (por defecto) o `300`, `pages` elige las páginas con la sintaxis `1-3, 5` (vacío = todas; una página repetida se convierte una vez) y `base_name` da nombre a las imágenes con el número real de página (`<base_name>-page-001.png`; con 1000 páginas o más, el número lleva cuatro cifras: `-page-0001`). Devuelve un ZIP, o la imagen directamente si se convierte una sola página. `400` si supera `PDF_TO_IMAGES_MAX_MEGAPIXELS`, `507` si el resultado estimado no cabe en el disco temporal o este se llena, `504` si tarda demasiado. |
 | `POST` | `/api/word-to-pdf` | Convierte un archivo `.doc` o `.docx`. |
 | `POST` | `/api/excel-to-pdf` | Convierte un archivo `.xls` o `.xlsx`. |
@@ -331,13 +339,13 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 | `POST` | `/api/metadata/read` | Devuelve en JSON los metadatos de un PDF (`title`, `author`, `subject`, `keywords`, `creator`, `producer`, `creation_date`, `modification_date`; `null` si faltan) y su número de páginas (`pages`). |
 | `POST` | `/api/metadata` | Escribe `title`, `author`, `subject` y `keywords` (máximo 500 caracteres cada uno; un campo vacío o ausente se elimina), quita el bloque XMP y borra las entradas no estándar que añaden otros programas (se conservan creador, productor, fechas y `/Trapped`). Con `remove_all=true` elimina todos los metadatos. La descarga se llama `<nombre>-metadatos.pdf` salvo que se indique `output_name`. |
 | `POST` | `/api/ocr` | Hace buscable un PDF escaneado con OCRmyPDF y Tesseract; `language` es `spa` (por defecto), `eng` o `spa+eng`. Las páginas que ya tienen texto se conservan. La descarga se llama `<nombre>-ocr.pdf` salvo que se indique `output_name`. Máximo `OCR_MAX_PAGES` páginas (2000 por defecto). |
-| `POST` | `/api/extract-text` | Extrae el texto de un PDF y lo devuelve como `text/plain; charset=utf-8` (`<nombre>.txt`, o `output_name` con extensión `.txt`). `pages` admite rangos (`1-3, 5`; vacío = todas), `page_separator` es `header` (por defecto, línea `--- Página N ---`), `formfeed` o `none`. Las cabeceras `X-Page-Count` y `X-Character-Count` indican páginas y caracteres extraídos. Responde `400` si el PDF no contiene texto (probablemente escaneado; usar OCR antes). |
+| `POST` | `/api/extract-text` | Extrae el texto de un PDF y lo devuelve como `text/plain; charset=utf-8` (`<nombre>.txt`, o `output_name` con extensión `.txt`). `pages` admite rangos (`1-3, 5`; vacío = todas), `page_separator` es `header` (por defecto, línea `--- Página N ---`), `formfeed` o `none`. Los rangos se extraen en el orden indicado y una página repetida se extrae otra vez, con un máximo de 10 veces las páginas del PDF en total (mínimo 100) y 1000 caracteres en `pages`. Las cabeceras `X-Page-Count` y `X-Character-Count` indican páginas y caracteres extraídos. Responde `400` si el PDF no contiene texto (probablemente escaneado; usar OCR antes). |
 | `POST` | `/api/documents` | Sube un PDF una sola vez y devuelve su `id` y número de páginas. |
 | `GET` | `/api/documents/{id}/pages/{n}` | Devuelve la página `n` como JPEG; `width` controla el tamaño (100-2000 px). |
 | `POST` | `/api/documents/{id}/edit` | Genera el PDF editado a partir de `pages` sin volver a subir el archivo. |
 | `POST` | `/api/documents/{id}/sign` | Firma el documento subido sin volver a enviarlo: `signature` es la imagen de la firma (PNG o JPEG; la transparencia del PNG se conserva) y `placements` una lista JSON como `[{"page": 1, "x": 0.6, "y": 0.8, "width": 0.3, "height": 0.08}]`, con la caja en fracciones (0-1) de la página tal como se ve (origen arriba a la izquierda, ya girada). Admite hasta 200 cajas que deben quedar dentro de la página. Devuelve `firmado.pdf` salvo que se indique `output_name`; después se borra el documento subido, como en `/edit`. |
 | `DELETE` | `/api/documents/{id}` | Elimina el documento subido. |
-| `POST` | `/api/edit-pages` | Genera un PDF a partir de `pages`, una lista JSON como `[{"page": 3, "rotation": 90}]`; las páginas omitidas se eliminan. |
+| `POST` | `/api/edit-pages` | Genera un PDF a partir de `pages`, una lista JSON como `[{"page": 3, "rotation": 90}]`; las páginas omitidas se eliminan. La lista admite como máximo 10 veces las páginas del PDF (mínimo 100), igual que `/api/documents/{id}/edit`. |
 
 Los documentos subidos a `/api/documents` se guardan en una carpeta temporal
 del contenedor y se eliminan en cuanto se descarga el PDF editado o firmado, al cerrar
@@ -355,6 +363,8 @@ Los errores devuelven un JSON con `detail` en español:
   que desbloquearlo antes; los PDF que solo tienen contraseña de propietario
   se procesan con normalidad). El detalle técnico del error no se envía al
   cliente: queda en el registro del servidor (`docker compose logs`).
+- `403`: petición `POST` o `DELETE` a `/api/` enviada desde una página de otro
+  sitio (ver «Consideraciones de despliegue»).
 - `413`: un archivo supera `MAX_UPLOAD_MB` o el conjunto supera
   `MAX_TOTAL_UPLOAD_MB`.
 - `503`: falta LibreOffice, Ghostscript, OCRmyPDF o Tesseract (o un idioma
@@ -365,10 +375,8 @@ Los errores devuelven un JSON con `detail` en español:
   la estimación previa, o porque el disco se llenó durante la conversión).
 - `410`: el documento de **Organizar páginas** o **Firmar PDF** ha caducado.
 
-La documentación interactiva generada por FastAPI está disponible en
-[`/docs`](http://localhost:8000/docs) cuando el servidor está en ejecución.
-También se puede consultar el esquema OpenAPI en
-[`/openapi.json`](http://localhost:8000/openapi.json).
+La documentación interactiva de FastAPI (`/docs`, `/redoc` y `/openapi.json`)
+está desactivada: la API se describe en esta tabla.
 
 ## Pruebas
 
@@ -423,6 +431,31 @@ compruebe si hay una versión nueva tras reconstruir la imagen. Las subidas
 tienen un tamaño máximo (`MAX_UPLOAD_MB` y `MAX_TOTAL_UPLOAD_MB`, 500 MB y
 1 GB por defecto) y `docker-compose.yml` limita la memoria del contenedor a
 3 GB (`mem_limit`).
+
+Además:
+
+- **Peticiones de otros sitios.** Las peticiones `POST` y `DELETE` a `/api/`
+  que el navegador marca como enviadas desde otro sitio (`Sec-Fetch-Site:
+  cross-site` o `same-site`, lo que incluye otra aplicación en otro puerto de
+  `localhost`), o cuyo `Origin` no coincide con el `Host`, se rechazan con
+  `403`. Así una página web cualquiera no puede subir archivos al servicio ni
+  borrar documentos. Las peticiones sin esas cabeceras (curl, scripts) y las
+  de las propias páginas del servicio funcionan igual. Detrás de un proxy
+  inverso, el proxy debe conservar la cabecera `Host` original.
+- **LibreOffice sin enlaces externos.** Cada conversión usa un perfil nuevo
+  con `BlockUntrustedRefererLinks`, sin contenido activo (OLE, DDE), sin
+  actualizar vínculos y con un proxy inexistente para HTTP(S). Una imagen
+  enlazada a `http://...` no se descarga y una enlazada a `file:///...` no se
+  incrusta en el PDF.
+- **Ghostscript solo recibe PDF.** **Comprimir PDF** y **OCR** quitan lo que
+  haya antes de la cabecera `%PDF-` (un programa PostScript delante de un PDF
+  válido se ejecutaría) y rechazan archivos sin cabecera.
+- **Límites contra trabajos desproporcionados:** listas de páginas,
+  miniaturas, píxeles de las imágenes subidas y longitud de los nombres de
+  descarga (ver la tabla de constantes).
+- **Contenedor.** `docker-compose.yml` usa `init: true` (recoge los procesos
+  zombi de LibreOffice, Ghostscript o Tesseract), `cap_drop: [ALL]`,
+  `security_opt: no-new-privileges:true` y `pids_limit: 512`.
 
 La interfaz no carga recursos externos: las fuentes Manrope y DM Mono se
 sirven desde `static/fonts/`, distribuidas bajo la SIL Open Font License, por
