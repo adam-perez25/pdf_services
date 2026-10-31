@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Firmar PDF | PDF Toolkit</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <main class="shell service-page">
+        <section class="intro">
+            <p class="eyebrow">SERVICIO 15 / FIRMAR</p>
+            <h1>Firmar PDF<br><em>con tu firma.</em></h1>
+            <p class="lede">Dibuja tu firma o sube una imagen y colócala en las páginas que quieras.</p>
+        </section>
+
+        <nav class="service-back" aria-label="Navegación del servicio">
+            <a class="back-button" href="/">&#8592; Menu</a>
+        </nav>
+
+        <section class="workspace" aria-labelledby="sign-title">
+            <p class="sign-notice">Es una firma visual: se añade como una imagen sobre la página. No es una firma digital ni electrónica certificada, así que no acredita la identidad de quien firma ni protege el documento frente a cambios.</p>
+
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">01 / DOCUMENTO</p>
+                    <h2 id="sign-title">Documento PDF</h2>
+                </div>
+                <span id="sign-page-count" class="counter">0 páginas</span>
+            </div>
+
+            <label class="dropzone" for="sign-file-input" id="sign-dropzone">
+                <span class="drop-icon">+</span>
+                <span><strong>Seleccionar PDF</strong><small id="sign-file-name">o arrástralo aquí</small></span>
+                <input id="sign-file-input" type="file" accept="application/pdf,.pdf">
+            </label>
+
+            <div class="section-heading output-heading">
+                <div>
+                    <p class="eyebrow">02 / FIRMA</p>
+                    <h2>Crea tu firma</h2>
+                </div>
+            </div>
+
+            <label class="name-field">
+                <span>Cómo crear la firma</span>
+                <select id="sign-mode">
+                    <option value="draw" selected>Dibujarla</option>
+                    <option value="upload">Subir una imagen (PNG o JPEG)</option>
+                </select>
+            </label>
+
+            <div id="sign-draw-options">
+                <div class="sign-pad-wrap">
+                    <canvas id="sign-pad" class="sign-pad" aria-label="Zona para dibujar la firma con el ratón o el dedo"></canvas>
+                </div>
+                <div class="page-toolbar sign-pad-tools">
+                    <label class="sign-inline-field">
+                        <span>Color</span>
+                        <select id="sign-color">
+                            <option value="dark" selected>Negro</option>
+                            <option value="blue">Azul</option>
+                        </select>
+                    </label>
+                    <button class="tool-button" type="button" id="sign-clear">Borrar</button>
+                </div>
+            </div>
+
+            <div id="sign-upload-options" hidden>
+                <label class="dropzone" for="sign-image-input" id="sign-image-dropzone">
+                    <span class="drop-icon">+</span>
+                    <span><strong>Seleccionar imagen de la firma</strong><small id="sign-image-name">PNG (con fondo transparente si quieres) o JPEG</small></span>
+                    <input id="sign-image-input" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg">
+                </label>
+            </div>
+
+            <div id="sign-current" class="sign-current" hidden>
+                <span class="counter">Firma actual</span>
+                <img id="sign-current-image" alt="Firma que se va a colocar">
+            </div>
+
+            <div class="section-heading output-heading">
+                <div>
+                    <p class="eyebrow">03 / COLOCAR</p>
+                    <h2>Coloca la firma</h2>
+                </div>
+                <span id="sign-placement-count" class="counter">0 firmas</span>
+            </div>
+
+            <div id="sign-empty" class="empty-state">Selecciona un PDF y crea tu firma para colocarla.</div>
+
+            <div id="sign-editor" hidden>
+                <div class="page-toolbar">
+                    <button class="tool-button" type="button" id="sign-prev" aria-label="Página anterior">&#8592; Anterior</button>
+                    <label class="sign-inline-field">
+                        <span>Página</span>
+                        <select id="sign-page-select"></select>
+                    </label>
+                    <button class="tool-button" type="button" id="sign-next" aria-label="Página siguiente">Siguiente &#8594;</button>
+                    <button class="tool-button" type="button" id="sign-add">+ Añadir firma en esta página</button>
+                </div>
+                <p class="view-lede sign-help">Arrastra la firma para moverla y usa la esquina para cambiar su tamaño. Con el teclado: flechas para mover (Mayús para ir más rápido), + y - para el tamaño, Supr para quitarla.</p>
+                <div class="sign-stage-wrap">
+                    <div id="sign-stage" class="sign-stage">
+                        <img id="sign-page-image" alt="">
+                    </div>
+                </div>
+                <ol id="sign-placements" class="file-list sign-placements" aria-live="polite"></ol>
+            </div>
+
+            <div class="section-heading output-heading">
+                <div>
+                    <p class="eyebrow">04 / EXPORTAR</p>
+                    <h2>Nombre del resultado</h2>
+                </div>
+            </div>
+
+            <form id="sign-form">
+                <label class="name-field">
+                    <span>Nombre del PDF</span>
+                    <input id="sign-output-name" type="text" value="firmado.pdf" maxlength="120" autocomplete="off">
+                </label>
+                <button class="primary-button" type="submit">
+                    <span>Descargar PDF firmado</span>
+                    <span aria-hidden="true">&#8594;</span>
+                </button>
+            </form>
+            <p id="sign-status" class="status" role="status"></p>
+        </section>
+    </main>
+    <script src="/static/common.js"></script>
+    <script src="/static/sign.js"></script>
+</body>
+</html>

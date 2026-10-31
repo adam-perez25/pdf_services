@@ -55,6 +55,13 @@ mismo servidor y no requiere un frontend independiente.
   en pantallas táctiles manteniendo pulsada la página) antes de descargar el PDF
   resultante.
   Al pulsar una página se abre una vista ampliada en alta resolución.
+- **Firmar PDF:** dibuja tu firma con el ratón o el dedo (tinta negra o azul)
+  o sube una imagen PNG (admite fondo transparente) o JPEG, y colócala sobre
+  la vista previa de las páginas que quieras: se arrastra, se cambia de tamaño
+  sin deformarla y también se mueve con las flechas del teclado. Es una firma
+  **visual** (una imagen sobre la página), no una firma digital certificada:
+  no acredita la identidad de quien firma ni protege el documento frente a
+  cambios. Funciona aunque las páginas estén giradas.
 
 Los archivos se procesan durante la solicitud y se devuelven como descargas.
 La aplicación no incluye almacenamiento permanente de documentos.
@@ -191,6 +198,10 @@ como constantes en `app/main.py`:
 | `STAMP_MAX_START_NUMBER` | 100 000 | Número inicial máximo de la numeración. |
 | `STAMP_MARGIN` | 28 pt | Distancia de los números de página al borde. |
 | `MAX_METADATA_LENGTH` | 500 | Longitud máxima de cada campo en **Editar metadatos**. |
+| `SIGNATURE_MAX_MB` | 10 MB | Tamaño máximo de la imagen de la firma; si se supera responde `413`. |
+| `SIGNATURE_MAX_SOURCE_PIXELS` | 40 000 000 | Píxeles máximos de la imagen de la firma subida. |
+| `SIGNATURE_MAX_SIDE` | 2000 px | La firma se reduce a este lado máximo antes de incrustarla en el PDF. |
+| `SIGNATURE_MAX_PLACEMENTS` | 200 | Número máximo de firmas colocadas en una petición. |
 
 Si una conversión o compresión supera su tiempo máximo, se termina el proceso
 externo junto con todos los procesos que haya iniciado.
@@ -201,7 +212,7 @@ de Docker.
 ## Interfaz web
 
 Cada herramienta tiene su propia página: `/` (inicio), `/merge`, `/split`,
-`/pages`, `/compress`, `/metadata`, `/protect`, `/images`, `/pdf-to-images`, `/stamp`, `/word`,
+`/pages`, `/compress`, `/metadata`, `/protect`, `/images`, `/pdf-to-images`, `/stamp`, `/sign`, `/word`,
 `/excel` y `/powerpoint`.
 
 La interfaz tiene modo oscuro automático: sigue la preferencia de tema claro u
@@ -232,11 +243,12 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 | `POST` | `/api/documents` | Sube un PDF una sola vez y devuelve su `id` y número de páginas. |
 | `GET` | `/api/documents/{id}/pages/{n}` | Devuelve la página `n` como JPEG; `width` controla el tamaño (100-2000 px). |
 | `POST` | `/api/documents/{id}/edit` | Genera el PDF editado a partir de `pages` sin volver a subir el archivo. |
+| `POST` | `/api/documents/{id}/sign` | Firma el documento subido sin volver a enviarlo: `signature` es la imagen de la firma (PNG o JPEG; la transparencia del PNG se conserva) y `placements` una lista JSON como `[{"page": 1, "x": 0.6, "y": 0.8, "width": 0.3, "height": 0.08}]`, con la caja en fracciones (0-1) de la página tal como se ve (origen arriba a la izquierda, ya girada). Admite hasta 200 cajas que deben quedar dentro de la página. Devuelve `firmado.pdf` salvo que se indique `output_name`; después se borra el documento subido, como en `/edit`. |
 | `DELETE` | `/api/documents/{id}` | Elimina el documento subido. |
 | `POST` | `/api/edit-pages` | Genera un PDF a partir de `pages`, una lista JSON como `[{"page": 3, "rotation": 90}]`; las páginas omitidas se eliminan. |
 
 Los documentos subidos a `/api/documents` se guardan en una carpeta temporal
-del contenedor y se eliminan en cuanto se descarga el PDF editado, al cerrar
+del contenedor y se eliminan en cuanto se descarga el PDF editado o firmado, al cerrar
 la página, tras 30 minutos sin uso (se comprueba cada 5 minutos) y al iniciar
 el servidor. Si se sigue editando después de descargar, la página vuelve a
 subir el archivo automáticamente.
@@ -254,7 +266,7 @@ Los errores devuelven un JSON con `detail` en español:
 - `413`: un archivo supera `MAX_UPLOAD_MB` o el conjunto supera
   `MAX_TOTAL_UPLOAD_MB`.
 - `503`: falta LibreOffice o Ghostscript. `504`: la conversión tardó demasiado.
-- `410`: el documento de **Organizar páginas** ha caducado.
+- `410`: el documento de **Organizar páginas** o **Firmar PDF** ha caducado.
 
 La documentación interactiva generada por FastAPI está disponible en
 [`/docs`](http://localhost:8000/docs) cuando el servidor está en ejecución.

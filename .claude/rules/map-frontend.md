@@ -20,6 +20,7 @@ paths:
   | protect | protect.js (Proteger/Desbloquear mode select; password only in the multipart body) |
   | stamp | stamp.js (mode select toggles `#stamp-numbers-options` / `#stamp-watermark-options`) |
   | metadata | metadata.js (reads `/api/metadata/read` on file choice to prefill) |
+  | sign | sign.js (document store like pages.js; drawing pad canvas + PNG/JPEG upload; draggable/resizable `.sign-box` overlays on the page preview, arrow keys nudge) |
 
 - `office.js` is configured by data attributes on `#office-form`: `data-endpoint`, `data-extensions` (comma-separated, no dots), `data-default-name`, `data-missing-file`. Element ids are the same on all three pages (`office-input`, `office-dropzone`, `office-file-name`, `office-output-name`, `office-status`). A new Office-like tool is just a template with different data attributes.
 - `common.js` helpers:
@@ -30,9 +31,10 @@ paths:
 - pages.js uses the document store:
   - upload once to `/api/documents`,
   - thumbnails from `/api/documents/{id}/pages/{n}?width=`,
-  - save via `/api/documents/{id}/edit`,
+  - save via `/api/documents/{id}/edit` (sign.js: `/api/documents/{id}/sign`),
   - `DELETE` with `keepalive` on unload,
   - re-upload on 410.
 - CSP (set by the server): no inline `<script>` or handlers, no external hosts, images only from self or `blob:`. Fonts are local.
+- sign.js sends placements as fractions of the page preview (pdfium renders it already rotated and cropped, so it matches the displayed page). Box height is derived from width, the page aspect and the signature aspect. The pad and the "Firma actual" preview use `color-scheme: light; background: Canvas` so dark ink stays visible in dark mode without hardcoded colours; `touch-action: none` on the pad and boxes stops page scroll while drawing/dragging.
 - `/static` is served with `Cache-Control: no-cache`, so no cache-busting query strings are needed.
 - File input `accept` attributes must match the backend (`ALLOWED_IMAGE_FORMATS`, Office extensions).
