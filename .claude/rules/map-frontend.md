@@ -20,15 +20,15 @@ paths:
   | protect | protect.js (Proteger/Desbloquear mode select; password only in the multipart body) |
   | stamp | stamp.js (mode select toggles `#stamp-numbers-options` / `#stamp-watermark-options`) |
   | metadata | metadata.js (reads `/api/metadata/read` on file choice to prefill) |
-  | workflow | workflow.js (chains tools client-side: posts each result Blob to the next `/api/*` endpoint; steps defined in `STEP_DEFINITIONS`, protect forced last, merge forced first with several PDFs) |
+  | workflow | workflow.js (chains tools client-side: posts each result Blob to the next `/api/*` endpoint; steps defined in `STEP_DEFINITIONS` with `position` first/late/last: OCR first, metadata late, protect last, merge forced first with several PDFs; steps only move within their position group) |
   | extract-text | extract-text.js (downloads the .txt, then fills the read-only `#extract-text-preview` textarea via `.value` with the first 2000 chars; counts from `X-Page-Count` / `X-Character-Count`) |
   | sign | sign.js (document store like pages.js; drawing pad canvas + PNG/JPEG upload; draggable/resizable `.sign-box` overlays on the page preview, arrow keys nudge) |
   | ocr | ocr.js (language select `#ocr-language`: spa / eng / spa+eng; ignores resubmits while a request runs) |
 
-- `office.js` is configured by data attributes on `#office-form`: `data-endpoint`, `data-extensions` (comma-separated, no dots), `data-default-name`, `data-missing-file`. Element ids are the same on all three pages (`office-input`, `office-dropzone`, `office-file-name`, `office-output-name`, `office-status`). A new Office-like tool is just a template with different data attributes.
+- `office.js` is configured by data attributes on `#office-form`: `data-endpoint`, `data-extensions` (comma-separated, no dots), `data-default-name` (Spanish placeholder, used after a reset), `data-missing-file`. Choosing a file prefills the name with its stem + `.pdf`. Element ids are the same on all three pages (`office-input`, `office-dropzone`, `office-file-name`, `office-output-name`, `office-status`). A new Office-like tool is just a template with different data attributes.
 - `common.js` helpers:
   - Page setup: `setupDropzone`, `statusSetter` (toggles `.is-error`), `uploadProgress`.
-  - Requests and downloads: `postForm(url, formData, progress)`, `errorMessage(response, fallback)`, `downloadName(response)` (reads Content-Disposition), `downloadBlob`.
+  - Requests and downloads: `postForm(url, formData, progress)`, `errorMessage(response, fallback)`, `downloadName(response)` (reads Content-Disposition, prefers `filename*=UTF-8''...` over the ASCII `filename="..."` fallback), `downloadBlob`.
   - Checks and formatting: `withPdfExtension`, `isPdf`, `isImage`, `escapeHtml`.
 - Results download as a blob through a temporary `<a download>`. split.js and pdf-to-images.js check `blob.type === "application/zip"` because a single result comes back as a plain PDF or image.
 - pages.js uses the document store:

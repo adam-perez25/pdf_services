@@ -47,8 +47,9 @@ def test_ranges_use_the_given_names(client, sample_pdf):
 
     assert response.headers["content-disposition"] == 'attachment; filename="informe-split.zip"'
     files = zip_contents(response)
-    assert list(files) == ["Cap_tulo uno.pdf", "anexo.pdf"]
-    assert page_layout(files["Cap_tulo uno.pdf"]) == [(100, 0), (200, 0)]
+    # Accents and ñ are kept in the names.
+    assert list(files) == ["Capítulo uno.pdf", "anexo.pdf"]
+    assert page_layout(files["Capítulo uno.pdf"]) == [(100, 0), (200, 0)]
     assert page_layout(files["anexo.pdf"]) == [(400, 0)]
 
 
@@ -59,9 +60,43 @@ def test_duplicate_names_do_not_overwrite_each_other(client, sample_pdf):
 
 
 def test_missing_names_get_a_default(client, sample_pdf):
-    response = split(client, sample_pdf, mode="ranges", ranges="1, 3-4", names=json.dumps(["primero"]))
+    response = split(client, sample_pdf, mode="ranges", ranges="1, 3-4", names=json.dumps(["primero", None]))
 
     assert list(zip_contents(response)) == ["primero.pdf", "split-3-4.pdf"]
+
+
+@pytest.mark.parametrize("names", [None, "null", ""])
+def test_no_names_at_all_use_the_defaults(client, sample_pdf, names):
+    data = {} if names is None else {"names": names}
+    response = split(client, sample_pdf, mode="ranges", ranges="1, 3-4", **data)
+
+    assert list(zip_contents(response)) == ["split-1-1.pdf", "split-3-4.pdf"]
+
+
+def test_empty_or_dot_names_fall_back_to_the_range_default(client, sample_pdf):
+    response = split(client, sample_pdf, mode="ranges", ranges="1, 2, 3-4", names=json.dumps(["", "...", "  "]))
+
+    assert list(zip_contents(response)) == ["split-1-1.pdf", "split-2-2.pdf", "split-3-4.pdf"]
+
+
+@pytest.mark.parametrize(
+    "names",
+    [
+        json.dumps(["solo uno"]),  # fewer names than ranges
+        json.dumps(["a", "b", "c"]),  # more names than ranges
+        json.dumps({"a": 1}),
+        json.dumps("a"),
+        json.dumps(["a", 3]),
+        json.dumps(["a", ["b"]]),
+        "[" * 100_000 + "]" * 100_000,  # deeper than the JSON parser allows
+    ],
+)
+def test_names_must_be_one_string_per_range(client, sample_pdf, documents_dir, names):
+    response = split(client, sample_pdf, mode="ranges", ranges="1, 3-4", names=names)
+
+    assert response.status_code == 400
+    assert response.json()["detail"].startswith("Los nombres no son válidos")
+    assert list(documents_dir.iterdir()) == []
 
 
 def test_single_part_is_returned_as_a_pdf(client, sample_pdf):

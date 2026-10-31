@@ -89,7 +89,17 @@ def test_download_deletes_the_document(client, sample_pdf, documents_dir):
 
 @pytest.mark.parametrize(
     "pages",
-    ["[]", "not json", json.dumps([{"page": 9}]), json.dumps([{"page": 1, "rotation": 45}])],
+    [
+        "[]",
+        "not json",
+        json.dumps([{"page": 9}]),
+        json.dumps([{"page": 1, "rotation": 45}]),
+        json.dumps([{"page": 1.7}]),  # int() would have made it page 1
+        json.dumps([{"page": True}]),
+        json.dumps([{"page": 1, "rotation": 90.0}]),
+        "[" * 100_000 + "]" * 100_000,  # RecursionError in the JSON parser
+        '{"page": 1}',
+    ],
 )
 def test_invalid_edit_keeps_the_document(client, sample_pdf, documents_dir, pages):
     document_id = upload(client, sample_pdf)

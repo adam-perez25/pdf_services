@@ -105,10 +105,17 @@ def test_output_name_is_sanitised_and_ends_in_txt(client):
     named = extract(client, pdf, output_name="../mi texto.pdf")
     unsafe = extract(client, pdf, output_name='notas"<>.txt')
 
-    # FileResponse sends names with spaces in the RFC 5987 form; downloadName
-    # in common.js decodes it.
-    assert named.headers["content-disposition"] == "attachment; filename*=utf-8''mi%20texto.txt"
+    assert named.headers["content-disposition"] == 'attachment; filename="mi texto.txt"'
     assert unsafe.headers["content-disposition"] == 'attachment; filename="notas___.txt"'
+
+
+def test_unicode_name_round_trips(client):
+    response = extract(client, text_pdf(THREE_PAGES), filename="Informe año ñ.pdf")
+
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == (
+        "attachment; filename=\"Informe ano n.txt\"; filename*=UTF-8''Informe%20a%C3%B1o%20%C3%B1.txt"
+    )
 
 
 def test_pdf_without_text_suggests_ocr(client, documents_dir):

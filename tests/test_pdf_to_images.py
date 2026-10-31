@@ -49,6 +49,26 @@ def test_base_name_defaults_to_the_file_name(client, sample_pdf):
     assert list(zip_images(response))[0] == "informe-page-001.png"
 
 
+def test_unicode_file_name_survives_in_zip_and_entries(client, sample_pdf):
+    response = client.post(
+        "/api/pdf-to-images", files={"file": ("Informe año ñ.pdf", sample_pdf)}, data={"dpi": "72"}
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == (
+        "attachment; filename=\"Informe ano n-png.zip\"; filename*=UTF-8''Informe%20a%C3%B1o%20%C3%B1-png.zip"
+    )
+    assert list(zip_images(response))[0] == "Informe año ñ-page-001.png"
+
+
+def test_unicode_name_of_a_single_image(client):
+    response = convert(client, make_pdf(1), base_name="Página única")
+
+    assert response.headers["content-disposition"] == (
+        "attachment; filename=\"Pagina unica-page-001.png\"; filename*=UTF-8''P%C3%A1gina%20%C3%BAnica-page-001.png"
+    )
+
+
 def test_single_page_pdf_is_returned_as_an_image(client):
     response = convert(client, make_pdf(1), image_format="jpg", base_name="solo")
 

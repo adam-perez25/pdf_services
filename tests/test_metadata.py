@@ -135,6 +135,32 @@ def test_too_long_field_is_rejected(client):
     assert "500" in response.json()["detail"]
 
 
+def test_too_long_field_is_named_in_spanish(client):
+    response = edit(client, make_pdf(1), keywords="x" * (main.MAX_METADATA_LENGTH + 1))
+
+    assert response.json()["detail"] == (
+        f"El campo «Palabras clave» no puede superar {main.MAX_METADATA_LENGTH} caracteres."
+    )
+
+
+def test_remove_all_also_drops_page_xmp(client):
+    writer = PdfWriter(clone_from=PdfReader(BytesIO(make_pdf_with_metadata())))
+    xmp = DecodedStreamObject()
+    xmp.set_data(b"<x:xmpmeta><dc:creator>Ana Pagina</dc:creator></x:xmpmeta>")
+    xmp.update({NameObject("/Type"): NameObject("/Metadata"), NameObject("/Subtype"): NameObject("/XML")})
+    writer.pages[0][NameObject("/Metadata")] = writer._add_object(xmp)
+    source = BytesIO()
+    writer.write(source)
+    assert b"Ana Pagina" in source.getvalue()
+
+    response = edit(client, source.getvalue(), remove_all="true")
+
+    assert response.status_code == 200
+    reader = PdfReader(BytesIO(response.content))
+    assert all("/Metadata" not in page for page in reader.pages)
+    assert b"Ana Pagina" not in response.content
+
+
 def test_non_pdf_is_rejected(client):
     assert read(client, b"x", filename="foto.jpg").status_code == 400
     assert edit(client, b"x", filename="foto.jpg").status_code == 400

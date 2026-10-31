@@ -109,3 +109,95 @@ def test_eps_is_rejected_without_running_ghostscript(client, monkeypatch):
 
     assert response.status_code == 400
     assert "no es una imagen válida" in response.json()["detail"]
+
+
+def render_page(content: bytes, index: int = 0) -> Image.Image:
+    import pypdfium2
+
+    with main.PDFIUM_LOCK:
+        document = pypdfium2.PdfDocument(content)
+        try:
+            return document[index].render(scale=1).to_pil().convert("RGB")
+        finally:
+            document.close()
+
+
+def encoded(image: Image.Image, image_format: str, **options) -> bytes:
+    output = BytesIO()
+    image.save(output, format=image_format, **options)
+    return output.getvalue()
+
+
+def transparent_images() -> list[tuple[str, bytes]]:
+    rgba = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
+    rgba.paste((200, 0, 0, 255), (0, 0, 50, 100))  # left half opaque red
+    la = Image.new("LA", (100, 100), (0, 0))
+    la.paste((0, 255), (0, 0, 50, 100))  # left half opaque black
+    palette = rgba.convert("RGB").convert("P", palette=Image.ADAPTIVE, colors=4)
+    transparent_index = palette.getpixel((99, 0))
+    return [
+        ("rgba.png", encoded(rgba, "PNG")),
+        ("la.png", encoded(la, "PNG")),
+        ("palette.png", encoded(palette, "PNG", transparency=transparent_index)),
+        ("palette.gif", encoded(palette, "GIF", transparency=transparent_index)),
+        ("rgba.webp", encoded(rgba, "WEBP", lossless=True)),
+    ]
+
+
+@pytest.mark.parametrize(("name", "content"), transparent_images())
+def test_transparent_areas_become_white_not_black(client, name, content):
+    response = client.post("/api/images-to-pdf", files=[("images", (name, content))])
+
+    assert response.status_code == 200
+    page = render_page(response.content)
+    width, height = page.size
+    # The transparent right half is white; the opaque left half keeps its ink.
+    assert min(page.getpixel((width * 3 // 4, height // 2))) > 240
+    assert min(page.getpixel((width // 4, height // 2))) < 220
+
+
+def test_phone_photo_is_turned_upright_from_exif(client):
+    # Stored landscape (200x100) with EXIF orientation 6 ("rotate 90° CW"),
+    # like a phone photo taken in portrait: the page must be portrait.
+    image = Image.new("RGB", (200, 100), "white")
+    image.paste((0, 0, 0), (0, 0, 100, 100))  # left half black
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    response = client.post(
+        "/api/images-to-pdf", files=[("images", ("foto.jpg", encoded(image, "JPEG", exif=exif.tobytes())))]
+    )
+
+    assert response.status_code == 200
+    (width, height), = page_sizes(response.content)
+    assert height > width
+    page = render_page(response.content)
+    # After the 90° clockwise turn the black half is at the top.
+    assert sum(page.getpixel((page.width // 2, page.height // 4))) < 100
+    assert sum(page.getpixel((page.width // 2, page.height * 3 // 4))) > 600
+
+
+def test_multi_page_tiff_gives_one_page_per_frame(client):
+    frames = [Image.new("RGB", (40 + 10 * n, 30), color) for n, color in enumerate(["red", "green", "blue"])]
+    tiff = BytesIO()
+    frames[0].save(tiff, format="TIFF", save_all=True, append_images=frames[1:])
+
+    response = client.post(
+        "/api/images-to-pdf",
+        files=[("images", ("varias.tiff", tiff.getvalue())), ("images", ("otra.png", make_image(20, 20)))],
+    )
+
+    assert response.status_code == 200
+    assert page_sizes(response.content) == [(40, 30), (50, 30), (60, 30), (20, 20)]
+
+
+def test_animated_gif_uses_only_the_first_frame(client):
+    frames = [Image.new("RGB", (40, 30), color) for color in ["red", "green", "blue"]]
+    gif = BytesIO()
+    frames[0].save(gif, format="GIF", save_all=True, append_images=frames[1:], duration=100, loop=0)
+
+    response = client.post("/api/images-to-pdf", files=[("images", ("animado.gif", gif.getvalue()))])
+
+    assert response.status_code == 200
+    assert len(PdfReader(BytesIO(response.content)).pages) == 1
+    red, green, blue = render_page(response.content).getpixel((20, 15))
+    assert red > 200 and green < 60 and blue < 60

@@ -16,7 +16,7 @@
         </section>
 
         <nav class="service-back" aria-label="Navegación del servicio">
-            <a class="back-button" href="/">&#8592; Menu</a>
+            <a class="back-button" href="/">&#8592; Menú</a>
         </nav>
 
         <section class="workspace" aria-labelledby="office-title">
@@ -25,7 +25,7 @@
                 <p class="view-lede">Todas las hojas del libro se convierten mediante LibreOffice.</p>
             </div>
 
-            <form id="office-form" data-endpoint="/api/excel-to-pdf" data-extensions="xls,xlsx" data-default-name="spreadsheet.pdf" data-missing-file="Selecciona una hoja de cálculo Excel.">
+            <form id="office-form" data-endpoint="/api/excel-to-pdf" data-extensions="xls,xlsx" data-default-name="hoja-de-calculo.pdf" data-missing-file="Selecciona una hoja de cálculo Excel.">
                 <label class="dropzone" for="office-input" id="office-dropzone">
                     <span class="drop-icon">+</span>
                     <span><strong>Seleccionar hoja de cálculo</strong><small id="office-file-name">o arrástrala aquí</small></span>
@@ -34,7 +34,7 @@
 
                 <label class="name-field">
                     <span>Nombre del PDF</span>
-                    <input id="office-output-name" type="text" value="spreadsheet.pdf" maxlength="120" autocomplete="off">
+                    <input id="office-output-name" type="text" value="hoja-de-calculo.pdf" maxlength="120" autocomplete="off">
                 </label>
                 <button class="primary-button" type="submit">
                     <span>Convertir y descargar PDF</span>

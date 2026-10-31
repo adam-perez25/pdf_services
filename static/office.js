@@ -22,6 +22,8 @@ setupDropzone(officeDropzone, (files) => setOfficeFile(files.find(isOfficeFile) 
 function setOfficeFile(file) {
     selectedOfficeFile = file;
     officeFileName.textContent = selectedOfficeFile ? selectedOfficeFile.name : emptyFileLabel;
+    // Like the other tools, the PDF is named after the chosen file.
+    if (file) officeOutputName.value = `${file.name.replace(/\.[^.]+$/, "") || "documento"}.pdf`;
 }
 
 officeForm.addEventListener("submit", async (event) => {

@@ -12,11 +12,11 @@
         <section class="intro">
             <p class="eyebrow">SERVICIO 16 / FLUJO DE TRABAJO</p>
             <h1>Varias herramientas<br><em>de una sola vez.</em></h1>
-            <p class="lede">Encadena pasos (unir, numerar, borrar metadatos, comprimir, proteger) y descarga solo el resultado final.</p>
+            <p class="lede">Encadena pasos (unir, OCR, numerar, marca de agua, comprimir, borrar metadatos, proteger) y descarga solo el resultado final.</p>
         </section>
 
         <nav class="service-back" aria-label="Navegación del servicio">
-            <a class="back-button" href="/">&#8592; Menu</a>
+            <a class="back-button" href="/">&#8592; Menú</a>
         </nav>
 
         <section class="workspace" aria-labelledby="workflow-files-title">
@@ -45,7 +45,7 @@
                     </div>
                     <span id="workflow-step-count" class="counter">0 pasos</span>
                 </div>
-                <p class="view-lede">Cada paso usa el resultado del anterior. «Proteger con contraseña» siempre va al final, porque después ya no se puede modificar el PDF.</p>
+                <p class="view-lede">Cada paso usa el resultado del anterior. Algunos tienen un sitio fijo: el OCR va siempre el primero (el texto que añaden la numeración o la marca de agua se excluye del reconocimiento y taparía parte del escaneo), los metadatos casi al final (comprimir y el OCR añaden los suyos) y «Proteger con contraseña» siempre al final, porque después ya no se puede modificar el PDF.</p>
 
                 <div id="workflow-empty-steps" class="empty-state workflow-empty-steps">Añade al menos un paso.</div>
                 <ol id="workflow-steps" class="workflow-steps" aria-live="polite"></ol>

@@ -22,9 +22,16 @@ mismo servidor y no requiere un frontend independiente.
   con una página por imagen. Cada página se ajusta al tamaño A4 en la
   orientación de la imagen; las imágenes pequeñas no se amplían. Se aceptan
   PNG, JPEG, WEBP, GIF, BMP y TIFF; otros formatos (por ejemplo EPS) se
-  rechazan.
+  rechazan. Las zonas transparentes (PNG, GIF, WEBP) quedan en blanco, las
+  fotos del móvil se giran según su orientación EXIF y un TIFF de varias
+  páginas da una página por cada una; de un GIF o WEBP animado solo se usa el
+  primer fotograma.
 - **Word a PDF:** convierte archivos `.doc` y `.docx` mediante LibreOffice en
-  modo headless.
+  modo headless. En las tres conversiones de Office el PDF se llama como el
+  archivo subido (se puede cambiar), y se rechazan los archivos vacíos y los
+  `.docx`/`.xlsx`/`.pptx` que no son un documento de Office (ni ZIP ni el
+  formato binario antiguo); los `.doc`/`.xls`/`.ppt` se aceptan tal cual,
+  porque a menudo son RTF, HTML o CSV exportados con esa extensión.
 - **Excel a PDF:** convierte archivos `.xls` y `.xlsx`; todas las hojas del
   libro pasan al PDF.
 - **PowerPoint a PDF:** convierte archivos `.ppt` y `.pptx`, con una página
@@ -61,8 +68,14 @@ mismo servidor y no requiere un frontend independiente.
   escaneadas con [OCRmyPDF](https://ocrmypdf.readthedocs.io/) y Tesseract y lo
   añade como una capa invisible, para poder buscar, seleccionar y copiar el
   texto sin cambiar el aspecto del documento. Idiomas: español (por defecto),
-  inglés o ambos. Las páginas que ya tienen texto se dejan como están. Tarda
-  varios segundos por página.
+  inglés o ambos. Solo se reconocen las páginas que contienen imágenes: las de
+  texto digital se copian sin cambios. En las páginas escaneadas se reconoce la
+  imagen aunque ya tengan algo de texto (por ejemplo un número de página
+  añadido) y ese texto se conserva; una capa OCR anterior se rehace
+  (`--redo-ocr`). Las páginas escaneadas de lado o boca abajo se giran
+  automáticamente (`--rotate-pages`). Los PDF con formularios rellenables se
+  procesan con `--skip-text` (OCRmyPDF no admite rehacer el OCR en ellos).
+  Tarda varios segundos por página.
 - **Extraer texto:** descarga el texto de un PDF como archivo `.txt` (UTF-8), de
   todas las páginas o de un rango (`1-3, 5`), con un encabezado
   `--- Página N ---`, un salto de página o nada entre páginas, y muestra una
@@ -74,9 +87,14 @@ mismo servidor y no requiere un frontend independiente.
   resultante.
   Al pulsar una página se abre una vista ampliada en alta resolución.
 - **Flujo de trabajo:** encadena varias herramientas de una sola vez (por
-  ejemplo unir, numerar páginas, borrar metadatos, comprimir y proteger) y
-  descarga solo el resultado final. Si se eligen varios PDFs, el primer paso es
-  siempre unirlos; «Proteger con contraseña» va siempre al final. El navegador
+  ejemplo unir, OCR, numerar páginas, comprimir, borrar metadatos y proteger) y
+  descarga solo el resultado final. Algunos pasos tienen un sitio fijo: si se
+  eligen varios PDFs, el primer paso es siempre unirlos; el OCR va justo
+  después (el texto que añaden la numeración o la marca de agua se excluye del
+  reconocimiento); los metadatos van tras los demás pasos (comprimir y el OCR
+  escriben su propio productor, fechas y XMP, que así también se borran), y
+  «Proteger con contraseña» va siempre al final. Los demás pasos se pueden
+  ordenar libremente. El navegador
   llama uno tras otro a los mismos endpoints de la API, así que cada paso
   aplica sus propias validaciones y límites; si un paso falla, se muestra su
   error y se puede descargar el resultado del último paso correcto.
@@ -268,6 +286,9 @@ como los PDF habituales de pocos MB, o con una estimación menor de
 `HEAVY_JOB_WAIT_SECONDS`, la respuesta es `503` («El servidor está ocupado con
 otros documentos grandes...») con la cabecera `Retry-After`. Las peticiones en
 espera ocupan un hilo del servidor (hay 40), lo que sobra para un uso personal.
+Al terminar un trabajo grande, el servidor devuelve al sistema la memoria que
+ha quedado libre (`malloc_trim` de glibc, unos segundos después), así que el
+contenedor en reposo no se queda con el tamaño del último trabajo grande.
 
 Otros valores fijos, definidos como constantes en `app/main.py`:
 
@@ -330,24 +351,31 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 | `POST` | `/api/split` | Extrae un rango mediante `start_page` y `end_page`. |
 | `POST` | `/api/split-zip` | Divide un PDF en una sola petición y devuelve un ZIP. `mode=pages` crea un PDF por página (`base_name`); `mode=ranges` usa `ranges` (`1-3, 4-6`; hasta 500 rangos que sumen como máximo 10 veces las páginas del PDF, mínimo 100) y la lista JSON `names`. Si solo resulta un archivo, devuelve el PDF directamente. |
 | `POST` | `/api/images-to-pdf` | Convierte las imágenes recibidas como `images`. Cada imagen puede tener como máximo `IMAGE_MAX_PIXELS` (100 millones de píxeles). |
+| `POST` | `/api/split` | Extrae un rango mediante `start_page` y `end_page` (sin `end_page`, hasta la última página; `0` o negativos responden `400`). |
+| `POST` | `/api/split-zip` | Divide un PDF en una sola petición y devuelve un ZIP. `mode=pages` crea un PDF por página (`base_name`); `mode=ranges` usa `ranges` (`1-3, 4-6`) y `names`, una lista JSON con un nombre por rango (un nombre vacío o `null` usa `split-INICIO-FIN`; sin `names` o con `null`, todos usan ese nombre; una lista de otra longitud o con otros tipos responde `400`). Si solo resulta un archivo, devuelve el PDF directamente. |
+| `POST` | `/api/images-to-pdf` | Convierte las imágenes recibidas como `images` (transparencia sobre blanco, orientación EXIF, una página por fotograma de un TIFF; primer fotograma de un GIF/WEBP animado). |
 | `POST` | `/api/pdf-to-images` | Convierte cada página de un PDF en una imagen; `image_format` es `png` (por defecto) o `jpg`, `dpi` es `72`, `150` (por defecto) o `300`, `pages` elige las páginas con la sintaxis `1-3, 5` (vacío = todas; una página repetida se convierte una vez) y `base_name` da nombre a las imágenes con el número real de página (`<base_name>-page-001.png`; con 1000 páginas o más, el número lleva cuatro cifras: `-page-0001`). Devuelve un ZIP, o la imagen directamente si se convierte una sola página. `400` si supera `PDF_TO_IMAGES_MAX_MEGAPIXELS`, `507` si el resultado estimado no cabe en el disco temporal o este se llena, `504` si tarda demasiado. |
-| `POST` | `/api/word-to-pdf` | Convierte un archivo `.doc` o `.docx`. |
-| `POST` | `/api/excel-to-pdf` | Convierte un archivo `.xls` o `.xlsx`. |
-| `POST` | `/api/powerpoint-to-pdf` | Convierte un archivo `.ppt` o `.pptx`. |
+| `POST` | `/api/word-to-pdf` | Convierte un archivo `.doc` o `.docx`. Sin `output_name`, el PDF se llama como el archivo subido. `400` si está vacío o si un `.docx` no es ZIP ni OLE. |
+| `POST` | `/api/excel-to-pdf` | Convierte un archivo `.xls` o `.xlsx` (mismas reglas). |
+| `POST` | `/api/powerpoint-to-pdf` | Convierte un archivo `.ppt` o `.pptx` (mismas reglas). |
 | `POST` | `/api/compress` | Comprime un PDF; `level` es `strong`, `recommended` (por defecto) o `high`. Las cabeceras `X-Original-Size`, `X-Compressed-Size` y `X-Compression-Applied` indican el resultado. |
 | `POST` | `/api/protect` | Cifra un PDF con AES-256 usando `password` (obligatoria, máximo 127 bytes). Responde `400` si el PDF ya estaba protegido. |
 | `POST` | `/api/unlock` | Quita la contraseña de un PDF protegido usando `password` (puede ir vacía si el PDF solo tiene restricciones de permisos). Responde `400` con `Contraseña incorrecta` si no coincide, o si el PDF no estaba protegido. |
-| `POST` | `/api/stamp` | Numera las páginas (`mode=numbers`, por defecto) o añade una marca de agua (`mode=watermark`). Números: `position` (`bottom-center` por defecto, `bottom-left`, `bottom-right`, `top-center`, `top-left`, `top-right`), `number_format` (`n` → `1`, `n-of-total` → `1 / N`, `page-n-of-total` → `Página 1 de N`; N es el último número), `start_number` (0-100000, por defecto 1) y `font_size` (6-72, por defecto 12). Marca de agua: `text` (obligatorio, hasta 100 caracteres), `font_size` (8-200, por defecto 60), `opacity` (0.1-1, por defecto 0.3) y `rotation` (`45` por defecto o `0`). `output_name` es opcional (`<nombre>-numerado.pdf` / `<nombre>-marca-de-agua.pdf`). |
+| `POST` | `/api/stamp` | Numera las páginas (`mode=numbers`, por defecto) o añade una marca de agua (`mode=watermark`). Números: `position` (`bottom-center` por defecto, `bottom-left`, `bottom-right`, `top-center`, `top-left`, `top-right`), `number_format` (`n` → `1`, `n-of-total` → `1 / N`, `page-n-of-total` → `Página 1 de N`; N es el último número), `start_number` (0-100000, por defecto 1) y `font_size` (6-72, por defecto 12). Marca de agua: `text` (obligatorio, hasta 100 caracteres), `font_size` (8-200, por defecto 60), `opacity` (0.1-1, por defecto 0.3) y `rotation` (`45` por defecto o `0`; se admite `45.0`). Los números de página dejan sitio a los trazos descendentes (g, p) en páginas muy bajas, y la marca de agua se reduce para caber a lo ancho y a lo alto (también girada). `output_name` es opcional (`<nombre>-numerado.pdf` / `<nombre>-marca-de-agua.pdf`). |
 | `POST` | `/api/metadata/read` | Devuelve en JSON los metadatos de un PDF (`title`, `author`, `subject`, `keywords`, `creator`, `producer`, `creation_date`, `modification_date`; `null` si faltan) y su número de páginas (`pages`). |
 | `POST` | `/api/metadata` | Escribe `title`, `author`, `subject` y `keywords` (máximo 500 caracteres cada uno; un campo vacío o ausente se elimina), sustituye el bloque XMP por uno nuevo con los mismos valores y borra las entradas no estándar que añaden otros programas (se conservan creador, productor, fechas y `/Trapped`). Con `remove_all=true` elimina todos los metadatos. La descarga se llama `<nombre>-metadatos.pdf` salvo que se indique `output_name`. |
 | `POST` | `/api/ocr` | Hace buscable un PDF escaneado con OCRmyPDF y Tesseract; `language` es `spa` (por defecto), `eng` o `spa+eng`. Las páginas que ya tienen texto se conservan. La descarga se llama `<nombre>-ocr.pdf` salvo que se indique `output_name`. Máximo `OCR_MAX_PAGES` páginas (2000 por defecto). |
 | `POST` | `/api/extract-text` | Extrae el texto de un PDF y lo devuelve como `text/plain; charset=utf-8` (`<nombre>.txt`, o `output_name` con extensión `.txt`). `pages` admite rangos (`1-3, 5`; vacío = todas), `page_separator` es `header` (por defecto, línea `--- Página N ---`), `formfeed` o `none`. Los rangos se extraen en el orden indicado y una página repetida se extrae otra vez, con un máximo de 10 veces las páginas del PDF en total (mínimo 100) y 1000 caracteres en `pages`. Las cabeceras `X-Page-Count` y `X-Character-Count` indican páginas y caracteres extraídos. Responde `400` si el PDF no contiene texto (probablemente escaneado; usar OCR antes). |
+| `POST` | `/api/metadata` | Escribe `title`, `author`, `subject` y `keywords` (máximo 500 caracteres cada uno; un campo vacío o ausente se elimina), quita el bloque XMP y borra las entradas no estándar que añaden otros programas (se conservan creador, productor, fechas y `/Trapped`). Con `remove_all=true` elimina todos los metadatos, también los bloques XMP de cada página. El error de longitud nombra el campo en español (Título, Autor, Asunto, Palabras clave). La descarga se llama `<nombre>-metadatos.pdf` salvo que se indique `output_name`. |
+| `POST` | `/api/ocr` | Hace buscable un PDF escaneado con OCRmyPDF y Tesseract; `language` es `spa` (por defecto), `eng` o `spa+eng`. Solo se procesan las páginas con imágenes (`--redo-ocr --pages ...`, conservando el texto visible y rehaciendo una capa OCR anterior); las páginas de texto digital se copian sin cambios; las páginas giradas se enderezan (`--rotate-pages`). Con formularios rellenables usa `--skip-text`. La descarga se llama `<nombre>-ocr.pdf` salvo que se indique `output_name`. Máximo `OCR_MAX_PAGES` páginas (2000 por defecto). |
+| `POST` | `/api/extract-text` | Extrae el texto de un PDF y lo devuelve como `text/plain; charset=utf-8` (`<nombre>.txt`, o `output_name` con extensión `.txt`). `pages` admite rangos (`1-3, 5`; vacío = todas), `page_separator` es `header` (por defecto, línea `--- Página N ---`), `formfeed` o `none`. Las cabeceras `X-Page-Count` y `X-Character-Count` indican páginas y caracteres extraídos. Responde `400` si el PDF no contiene texto (probablemente escaneado; usar OCR antes). |
 | `POST` | `/api/documents` | Sube un PDF una sola vez y devuelve su `id` y número de páginas. |
 | `GET` | `/api/documents/{id}/pages/{n}` | Devuelve la página `n` como JPEG; `width` controla el tamaño (100-2000 px). |
-| `POST` | `/api/documents/{id}/edit` | Genera el PDF editado a partir de `pages` sin volver a subir el archivo. |
+| `POST` | `/api/documents/{id}/edit` | Genera el PDF editado a partir de `pages` sin volver a subir el archivo (mismo formato que `/api/edit-pages`). |
 | `POST` | `/api/documents/{id}/sign` | Firma el documento subido sin volver a enviarlo: `signature` es la imagen de la firma (PNG o JPEG; la transparencia del PNG se conserva) y `placements` una lista JSON como `[{"page": 1, "x": 0.6, "y": 0.8, "width": 0.3, "height": 0.08}]`, con la caja en fracciones (0-1) de la página tal como se ve (origen arriba a la izquierda, ya girada). Admite hasta 200 cajas que deben quedar dentro de la página. Devuelve `firmado.pdf` salvo que se indique `output_name`; después se borra el documento subido, como en `/edit`. |
 | `DELETE` | `/api/documents/{id}` | Elimina el documento subido. |
 | `POST` | `/api/edit-pages` | Genera un PDF a partir de `pages`, una lista JSON como `[{"page": 3, "rotation": 90}]`; las páginas omitidas se eliminan. La lista admite como máximo 10 veces las páginas del PDF (mínimo 100), igual que `/api/documents/{id}/edit`. |
+| `POST` | `/api/edit-pages` | Genera un PDF a partir de `pages`, una lista JSON como `[{"page": 3, "rotation": 90}]`; las páginas omitidas se eliminan. `page` y `rotation` deben ser números enteros (`1.7` o `true` responden `400`); el giro resultante se guarda en grados de 0 a 270. |
 
 Los documentos subidos a `/api/documents` se guardan en una carpeta temporal
 del contenedor y se eliminan en cuanto se descarga el PDF editado o firmado, al cerrar
@@ -356,12 +384,20 @@ valores son configurables) y al iniciar el servidor. Si se sigue editando despu�
 subir el archivo automáticamente.
 
 Los endpoints que generan archivos aceptan el campo opcional `output_name`
-para indicar el nombre de la descarga. Las peticiones de archivos usan
-`multipart/form-data`.
+para indicar el nombre de la descarga. Los nombres conservan tildes, eñes y
+letras de cualquier alfabeto; se sustituyen por `_` las comillas, los
+caracteres de control y los que Windows no admite (`<>:"/\|?*`). Si el nombre
+no es ASCII, `Content-Disposition` lleva un nombre ASCII de reserva
+(`filename="Informe ano.pdf"`) y el nombre real en
+`filename*=UTF-8''Informe%20a%C3%B1o.pdf`, que es el que usan los navegadores.
+Las peticiones de archivos usan `multipart/form-data`.
 
 Los errores devuelven un JSON con `detail` en español:
 
-- `400`: archivo o parámetros no válidos, o PDF protegido con contraseña (hay
+- `400`: archivo o parámetros no válidos (también un campo que falta o con un
+  tipo erróneo, por ejemplo `dpi=abc`: en lugar del `422` en inglés de FastAPI
+  se responde `400` con «Falta el campo «dpi» o su valor no es válido.»; un
+  JSON anidado en exceso también es `400`), o PDF protegido con contraseña (hay
   que desbloquearlo antes; los PDF que solo tienen contraseña de propietario
   se procesan con normalidad). El detalle técnico del error no se envía al
   cliente: queda en el registro del servidor (`docker compose logs`).

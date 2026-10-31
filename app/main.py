@@ -1,6 +1,7 @@
 from collections import deque
 from contextlib import asynccontextmanager, contextmanager
 import errno
+import gc
 import importlib.util
 from io import BytesIO
 import json
@@ -18,15 +19,17 @@ import tempfile
 import threading
 import time
 import unicodedata
+from urllib.parse import quote
 import uuid
 import warnings
 from xml.sax.saxutils import escape as xml_escape
 import zipfile
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, ImageSequence, UnidentifiedImageError
 import pypdfium2
 from pypdf import PageObject, PdfReader, PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, FloatObject, NameObject, TextStringObject
@@ -89,6 +92,25 @@ async def lifespan(app: FastAPI):
 # No /docs, /redoc or /openapi.json: the strict CSP breaks the Swagger pages
 # anyway, and the API is described in the README.
 app = FastAPI(title="Unir PDF", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request, error: RequestValidationError):
+    """Answer FastAPI's English 422 (missing field, "abc" for a number...) with
+    a Spanish 400 like every other bad input. It runs inside the middlewares,
+    so the security headers are still added."""
+    fields = []
+    for item in error.errors():
+        location = [str(part) for part in item.get("loc", ()) if part not in ("body", "query", "path")]
+        name = location[0] if location else "petición"
+        if name not in fields:
+            fields.append(name)
+    quoted = ", ".join(f"«{name}»" for name in fields) or "«petición»"
+    if len(fields) > 1:
+        detail = f"Faltan los campos {quoted} o sus valores no son válidos."
+    else:
+        detail = f"Falta el campo {quoted} o su valor no es válido."
+    return JSONResponse({"detail": detail}, status_code=400)
 
 
 def max_request_bytes() -> int:
@@ -390,7 +412,9 @@ MAX_OUTPUT_NAME_LENGTH = 150
 
 def clean_base_name(output_name: str, default: str) -> str:
     name = Path(output_name.strip()).name
-    name = re.sub(r"[^A-Za-z0-9._ -]", "_", name).strip(" .")
+    # Letters and digits of any alphabet (accents, ñ) are kept; anything else
+    # (quotes, control characters, <>:"/\|?* that Windows rejects) becomes "_".
+    name = re.sub(r"[^\w. -]", "_", unicodedata.normalize("NFC", name)).strip(" .")
     if not name:
         name = default
     stem, extension = os.path.splitext(name)
@@ -517,13 +541,33 @@ def write_pdf_to_file(writer: PdfWriter) -> Path:
     return path
 
 
-def file_download(path: Path, filename: str, media_type: str = "application/pdf") -> FileResponse:
-    """Send a work file as an attachment and delete it once it has been sent."""
+def content_disposition(filename: str) -> str:
+    """Content-Disposition for a download name (already cleaned by clean_base_name).
+
+    Plain ASCII names go as filename="..."; others also get an ASCII fallback
+    plus filename*=UTF-8''... (RFC 6266), which browsers prefer, so accents
+    and ñ survive. Quotes, backslashes and control characters never reach the
+    header, so it cannot be broken or extended.
+    """
+    # "año" -> "ano": accents are dropped, other non-ASCII letters become "_".
+    fallback = "".join(
+        char for char in unicodedata.normalize("NFKD", filename) if unicodedata.category(char) != "Mn"
+    )
+    fallback = re.sub(r'[^\x20-\x7e]|["\\]', "_", fallback).strip() or "descarga"
+    if fallback == filename:
+        return f'attachment; filename="{filename}"'
+    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(filename, safe='')}"
+
+
+def file_download(path: Path, filename: str, media_type: str = "application/pdf", headers: dict | None = None,
+                  background: BackgroundTask | None = None) -> FileResponse:
+    """Send a work file as an attachment and delete it once it has been sent
+    (or run `background` instead, when other files must go too)."""
     return FileResponse(
         path,
         media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        background=BackgroundTask(path.unlink, missing_ok=True),
+        headers={**(headers or {}), "Content-Disposition": content_disposition(filename)},
+        background=background or BackgroundTask(path.unlink, missing_ok=True),
     )
 
 
@@ -676,6 +720,54 @@ def heavy_job(megabytes: int, uploads: list[UploadFile] = ()):
         yield
     finally:
         HEAVY_JOBS.release(megabytes)
+        release_free_memory()
+
+
+def _load_malloc_trim():
+    # glibc only (the Docker image): musl and Windows have no malloc_trim.
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        import ctypes
+
+        return ctypes.CDLL("libc.so.6").malloc_trim
+    except (OSError, AttributeError):
+        return None
+
+
+MALLOC_TRIM = _load_malloc_trim()
+# The job's objects (readers, writers) are only freed once the endpoint has
+# returned, a moment after heavy_job ends, so the trim runs a little later.
+MALLOC_TRIM_DELAY_SECONDS = 2.0
+_trim_lock = threading.Lock()
+_trim_timer: threading.Timer | None = None
+
+
+def _trim_now() -> None:
+    try:
+        gc.collect()
+        MALLOC_TRIM(0)
+    except Exception:
+        logger.debug("malloc_trim failed", exc_info=True)
+
+
+def release_free_memory() -> None:
+    """Give the memory a big job freed back to the system.
+
+    glibc keeps freed heap memory for reuse, so after a few big jobs the idle
+    container stays near its peak size; malloc_trim(0) returns the free pages.
+    Called only after big jobs (heavy_job reservations); several jobs ending
+    close together share one trim. A no-op where malloc_trim does not exist.
+    """
+    global _trim_timer
+    if MALLOC_TRIM is None:
+        return
+    with _trim_lock:
+        if _trim_timer is not None:
+            _trim_timer.cancel()
+        _trim_timer = threading.Timer(MALLOC_TRIM_DELAY_SECONDS, _trim_now)
+        _trim_timer.daemon = True
+        _trim_timer.start()
 
 
 # The file-processing endpoints are plain functions, not async: FastAPI runs
@@ -696,7 +788,7 @@ def merge_pdfs(
             if not file.filename or not file.filename.lower().endswith(".pdf"):
                 raise HTTPException(
                     status_code=400,
-                    detail="Todos los archivos deben tener extension PDF.",
+                    detail="Todos los archivos deben tener extensión PDF.",
                 )
         with heavy_job(job_estimate_mb("merge", *map(upload_size, files))):
             for file in files:
@@ -749,8 +841,10 @@ def split_pdf(
         with heavy_job(job_estimate_mb("split", upload_size(file))):
             reader = open_pdf_reader(file.file)
             page_count = len(reader.pages)
-            end_page = end_page or page_count
-            if start_page < 1 or end_page < start_page or end_page > page_count:
+            # Only a missing end_page means "to the last page"; 0 is an error.
+            if end_page is None:
+                end_page = page_count
+            if start_page < 1 or end_page < 1 or end_page < start_page or end_page > page_count:
                 raise HTTPException(
                     status_code=400,
                     detail=f"El rango debe estar entre 1 y {page_count}.",
@@ -819,12 +913,43 @@ def check_page_list_total(total: int, page_count: int) -> None:
         )
 
 
-def unique_pdf_names(names: list[str]) -> list[str]:
+def parse_user_json(value: str, message: str):
+    """json.loads for a form field: bad JSON, and JSON nested so deeply that
+    the parser hits the recursion limit, both answer 400 with `message`."""
+    try:
+        return json.loads(value)
+    except (ValueError, RecursionError) as error:
+        raise HTTPException(status_code=400, detail=message) from error
+
+
+def parse_part_names(value: str, count: int) -> list[str | None]:
+    """split-zip names: null/empty for all defaults, or a JSON list with one
+    string (or null, for the default) per range."""
+    message = "Los nombres no son válidos: deben ser una lista con un nombre por rango."
+    if not value.strip():
+        return [None] * count
+    names = parse_user_json(value, message)
+    if names is None:
+        return [None] * count
+    if (
+        not isinstance(names, list)
+        or len(names) != count
+        or not all(name is None or isinstance(name, str) for name in names)
+    ):
+        raise HTTPException(status_code=400, detail=message)
+    return names
+
+
+def unique_pdf_names(names: list[str], defaults: list[str] | None = None) -> list[str]:
     # Two parts with the same name would overwrite each other inside the ZIP.
+    # An empty (or dots-only) name falls back to its entry in defaults.
     seen: dict[str, int] = {}
     unique = []
-    for name in names:
-        stem = clean_output_name(name)[:-4]
+    for index, name in enumerate(names):
+        default = defaults[index] if defaults else "merged"
+        stem = clean_base_name(name, default)
+        if stem.lower().endswith(".pdf"):
+            stem = stem[:-4].strip(" .") or default
         count = seen.get(stem.lower(), 0) + 1
         seen[stem.lower()] = count
         unique.append(f"{stem}.pdf" if count == 1 else f"{stem}-{count}.pdf")
@@ -836,7 +961,7 @@ def split_pdf_zip(
     file: UploadFile = File(...),
     mode: str = Form("pages"),
     ranges: str = Form(""),
-    names: str = Form("[]"),
+    names: str = Form(""),
     base_name: str = Form("split-pdf"),
 ):
     """Split a PDF into several files in one request and return them as a ZIP.
@@ -872,12 +997,11 @@ def split_pdf_zip(
                         detail=f"Puedes indicar como máximo {SPLIT_MAX_RANGES} rangos.",
                     )
                 check_page_list_total(sum(end - start + 1 for start, end in parts), page_count)
-                try:
-                    given_names = [str(name) for name in json.loads(names)]
-                except (ValueError, TypeError) as error:
-                    raise HTTPException(status_code=400, detail="Los nombres no son válidos.") from error
-                given_names += [f"split-{start}-{end}" for start, end in parts[len(given_names):]]
-                part_names = unique_pdf_names(given_names[:len(parts)])
+                defaults = [f"split-{start}-{end}" for start, end in parts]
+                given_names = parse_part_names(names, len(parts))
+                part_names = unique_pdf_names(
+                    [name or default for name, default in zip(given_names, defaults)], defaults
+                )
                 zip_name = f"{Path(file.filename).stem}-split.zip"
 
             def build_part(start: int, end: int) -> Path:
@@ -919,12 +1043,7 @@ def split_pdf_zip(
     finally:
         file.file.close()
 
-    return FileResponse(
-        zip_path,
-        media_type="application/zip",
-        filename=clean_base_name(zip_name, "split-pdf.zip"),
-        background=BackgroundTask(zip_path.unlink, missing_ok=True),
-    )
+    return file_download(zip_path, clean_base_name(zip_name, "split-pdf.zip"), "application/zip")
 
 
 # The page organizer uploads a PDF once and then refers to it by id, so
@@ -1004,25 +1123,23 @@ def build_edited_pdf(reader: PdfReader, pages: str) -> bytes:
 
 
 def build_edited_writer(reader: PdfReader, pages: str) -> PdfWriter:
-    page_count = len(reader.pages)
-    try:
-        layout = json.loads(pages)
-        if not isinstance(layout, list) or not layout:
-            raise ValueError
-    except (ValueError, TypeError) as error:
-        raise HTTPException(
-            status_code=400,
-            detail="La lista de páginas no es válida.",
-        ) from error
+    invalid = HTTPException(status_code=400, detail="La lista de páginas no es válida.")
+    items = parse_user_json(pages, invalid.detail)
+    if not isinstance(items, list) or not items:
+        raise invalid
     # Checked before building anything: each entry adds a page to the result.
-    check_page_list_total(len(layout), page_count)
-    try:
-        layout = [(int(item["page"]), int(item.get("rotation", 0))) for item in layout]
-    except (ValueError, TypeError, KeyError, AttributeError) as error:
-        raise HTTPException(
-            status_code=400,
-            detail="La lista de páginas no es válida.",
-        ) from error
+    page_count = len(reader.pages)
+    check_page_list_total(len(items), page_count)
+    layout = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise invalid
+        page_number, rotation = item.get("page"), item.get("rotation", 0)
+        # Whole numbers only: 1.7 (or true) is not a page, and int() would
+        # silently turn it into page 1.
+        if any(isinstance(value, bool) or not isinstance(value, int) for value in (page_number, rotation)):
+            raise invalid
+        layout.append((page_number, rotation))
 
     writer = PdfWriter()
     for page_number, rotation in layout:
@@ -1037,8 +1154,11 @@ def build_edited_writer(reader: PdfReader, pages: str) -> PdfWriter:
                 detail="La rotación debe ser múltiplo de 90 grados.",
             )
         page = writer.add_page(reader.pages[page_number - 1])
-        if rotation % 360:
-            page.rotate(rotation % 360)
+        # page.rotate() adds to the current /Rotate (270 + 90 = 360), so the
+        # total is written modulo 360 instead.
+        total = (page.rotation + rotation) % 360
+        if total != page.get("/Rotate", 0):
+            page.rotation = total
     return writer
 
 
@@ -1244,6 +1364,33 @@ def a4_resolution(width: int, height: int) -> float:
     return max(short_side / A4_SHORT_INCHES, long_side / A4_LONG_INCHES, MIN_IMAGE_DPI)
 
 
+def image_page(frame: Image.Image) -> Image.Image:
+    """An RGB copy of one image frame, ready to become a PDF page.
+
+    Phone photos are turned upright from their EXIF orientation, and
+    transparent areas (PNG, GIF, WebP) are painted white instead of the black
+    a plain convert("RGB") gives.
+    """
+    # exif_transpose always copies, so it only runs when there is something to turn.
+    orientation = frame.getexif().get(0x0112, 1)
+    upright = (ImageOps.exif_transpose(frame) or frame) if orientation not in (None, 1) else frame
+    try:
+        if upright.mode == "P" and "transparency" in upright.info:
+            upright = upright.convert("RGBA")
+        if upright.mode in ("RGBA", "LA", "PA", "La", "RGBa") or "transparency" in upright.info:
+            rgba = upright.convert("RGBA")
+            background = Image.new("RGBA", rgba.size, "white")
+            background.alpha_composite(rgba)
+            rgba.close()
+            converted = background.convert("RGB")
+            background.close()
+            return converted
+        return upright.convert("RGB")
+    finally:
+        if upright is not frame:
+            upright.close()
+
+
 @app.post("/api/images-to-pdf")
 def images_to_pdf(
     images: list[UploadFile] = File(...),
@@ -1279,16 +1426,33 @@ def images_to_pdf(
             for image_file in images:
                 try:
                     with Image.open(image_file.file, formats=ALLOWED_IMAGE_FORMATS) as image:
-                        converted = image.convert("RGB")
-                except (UnidentifiedImageError, OSError, Image.DecompressionBombError,
-                        Image.DecompressionBombWarning) as error:
+                        # A multi-page TIFF gives one page per frame; animated
+                        # GIF/WebP only their first frame. Frames are decoded
+                        # one at a time.
+                        frame_count = getattr(image, "n_frames", 1) if image.format == "TIFF" else 1
+                        for frame in ImageSequence.Iterator(image):
+                            # Pillow checks the size of the first frame only.
+                            if frame.width * frame.height > IMAGE_MAX_PIXELS:
+                                raise HTTPException(
+                                    status_code=400,
+                                    detail=IMAGE_TOO_BIG_MESSAGE.format(
+                                        name=image_file.filename or "seleccionada",
+                                        megapixels=IMAGE_MAX_PIXELS // 1_000_000,
+                                    ),
+                                )
+                            converted = image_page(frame)
+                            try:
+                                page = BytesIO()
+                                converted.save(page, format="PDF", resolution=a4_resolution(*converted.size))
+                            finally:
+                                converted.close()
+                            writer.append(PdfReader(page))
+                            frame_count -= 1
+                            if frame_count <= 0:
+                                break
+                except (UnidentifiedImageError, OSError, SyntaxError, ValueError,
+                        Image.DecompressionBombError, Image.DecompressionBombWarning) as error:
                     raise invalid_image(image_file) from error
-                try:
-                    page = BytesIO()
-                    converted.save(page, format="PDF", resolution=a4_resolution(*converted.size))
-                finally:
-                    converted.close()
-                writer.append(PdfReader(page))
             output_path = write_pdf_to_file(writer)
     except HTTPException:
         raise
@@ -1561,43 +1725,76 @@ def pdf_to_images(
         return Response(
             content=single_image,
             media_type=media_type,
-            headers={"Content-Disposition": f'attachment; filename="{names[0]}"'},
+            headers={"Content-Disposition": content_disposition(names[0])},
         )
 
     input_path.unlink(missing_ok=True)
-    return FileResponse(
-        zip_path,
-        media_type="application/zip",
-        filename=f"{base}-{image_format}.zip",
-        background=BackgroundTask(remove_job_files),
+    return file_download(
+        zip_path, f"{base}-{image_format}.zip", "application/zip", background=BackgroundTask(remove_job_files)
     )
 
 
 @app.post("/api/word-to-pdf")
 def word_to_pdf(
     file: UploadFile = File(...),
-    output_name: str = Form("document.pdf"),
+    output_name: str = Form(""),
 ):
-    return convert_office_to_pdf(file, output_name, {".doc", ".docx"}, "DOC o DOCX")
+    return convert_office_to_pdf(file, output_name, {".doc", ".docx"}, "DOC o DOCX", "Word")
 
 
 @app.post("/api/excel-to-pdf")
 def excel_to_pdf(
     file: UploadFile = File(...),
-    output_name: str = Form("spreadsheet.pdf"),
+    output_name: str = Form(""),
 ):
-    return convert_office_to_pdf(file, output_name, {".xls", ".xlsx"}, "XLS o XLSX")
+    return convert_office_to_pdf(file, output_name, {".xls", ".xlsx"}, "XLS o XLSX", "Excel")
 
 
 @app.post("/api/powerpoint-to-pdf")
 def powerpoint_to_pdf(
     file: UploadFile = File(...),
-    output_name: str = Form("presentation.pdf"),
+    output_name: str = Form(""),
 ):
-    return convert_office_to_pdf(file, output_name, {".ppt", ".pptx"}, "PPT o PPTX")
+    return convert_office_to_pdf(file, output_name, {".ppt", ".pptx"}, "PPT o PPTX", "PowerPoint")
 
 
 OFFICE_TIMEOUT_SECONDS = env_int("OFFICE_TIMEOUT_SECONDS", 300, 10, 24 * 3600)
+# The English defaults the pages used to send; they now mean "name it after
+# the uploaded file", like an empty name.
+OFFICE_OLD_DEFAULT_NAMES = {"document.pdf", "spreadsheet.pdf", "presentation.pdf"}
+# .docx/.xlsx/.pptx are ZIP packages; Office also saves old binary (OLE)
+# files with the new extension. The legacy .doc/.xls/.ppt are often RTF,
+# HTML or CSV exports, which LibreOffice reads too, so they are not checked.
+OFFICE_SIGNATURES = (b"PK\x03\x04", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")
+OFFICE_PACKAGE_EXTENSIONS = {".docx", ".xlsx", ".pptx"}
+
+
+def check_office_content(file: UploadFile, extension: str, kind: str) -> None:
+    """Reject empty files, and .docx/.xlsx/.pptx that are neither ZIP nor OLE,
+    before LibreOffice is started for nothing."""
+    if upload_size(file) == 0:
+        file.file.close()
+        raise HTTPException(status_code=400, detail="El archivo está vacío.")
+    if extension not in OFFICE_PACKAGE_EXTENSIONS:
+        return
+    position = file.file.tell()
+    file.file.seek(0)
+    header = file.file.read(8)
+    file.file.seek(position)
+    if not header.startswith(OFFICE_SIGNATURES):
+        file.file.close()
+        raise HTTPException(
+            status_code=400,
+            detail=f"El archivo no parece un documento de {kind} válido.",
+        )
+
+
+def office_output_name(output_name: str, upload_name: str) -> str:
+    """The requested name, or the uploaded file's own name with .pdf."""
+    name = output_name.strip()
+    if not name or name.lower() in OFFICE_OLD_DEFAULT_NAMES:
+        name = clean_base_name(Path(upload_name).stem, "documento")
+    return clean_output_name(name)
 
 # Settings written into each throwaway LibreOffice profile before converting.
 # Without them a document can make the server fetch linked resources: an image
@@ -1650,6 +1847,7 @@ def convert_office_to_pdf(
     output_name: str,
     extensions: set[str],
     formats_label: str,
+    kind: str,
 ) -> Response:
     # LibreOffice picks Writer, Calc or Impress from the file extension, so the
     # upload keeps its own extension on disk.
@@ -1658,6 +1856,7 @@ def convert_office_to_pdf(
         file.file.close()
         raise HTTPException(status_code=400, detail=f"El archivo debe ser {formats_label}.")
     check_upload_sizes([file])
+    check_office_content(file, file_extension, kind)
 
     soffice = find_soffice()
     if not soffice:
@@ -1706,7 +1905,7 @@ def convert_office_to_pdf(
     finally:
         file.file.close()
 
-    return file_download(result_path, clean_output_name(output_name))
+    return file_download(result_path, office_output_name(output_name, file.filename))
 
 
 
@@ -1845,10 +2044,9 @@ def compress_pdf(
     compressed_size = output_path.stat().st_size
     # Already optimized PDFs can come out bigger; then the original is better.
     compressed = compressed_size < original_size
-    return FileResponse(
+    return file_download(
         output_path if compressed else input_path,
-        media_type="application/pdf",
-        filename=clean_output_name(output_name),
+        clean_output_name(output_name),
         headers={
             "X-Original-Size": str(original_size),
             "X-Compressed-Size": str(compressed_size if compressed else original_size),
@@ -1878,7 +2076,7 @@ def pdf_attachment(content: bytes, filename: str) -> Response:
     return Response(
         content=content,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": content_disposition(filename)},
     )
 
 
@@ -1974,6 +2172,10 @@ STAMP_MAX_START_NUMBER = 100_000
 STAMP_WATERMARK_MAX_LENGTH = 100
 STAMP_ROTATIONS = {0, 45}
 STAMP_MARGIN = 28  # points from the page edge for page numbers
+# Helvetica's cap height and descender (from the AFM), in em: the text must
+# fit from the descender of "g/p" up to the top of the capitals.
+HELVETICA_CAP_HEIGHT = 0.718
+HELVETICA_DESCENDER = 0.207
 # Helvetica advance widths (1/1000 em) for ASCII 32-126, from the standard AFM.
 HELVETICA_ASCII_WIDTHS = [
     278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278,
@@ -2051,7 +2253,7 @@ def number_stream(text: str, size: float, position: str, width: float, height: f
     margin = min(STAMP_MARGIN, min(width, height) * 0.08)
     # Shrink the label if it would run off the page (long labels, big font,
     # narrow page): it must fit between the margins, across and up.
-    size = min(size, (height - 2 * margin) / 0.718)
+    size = min(size, (height - 2 * margin) / (HELVETICA_CAP_HEIGHT + HELVETICA_DESCENDER))
     text_width = helvetica_width(text, size)
     room = width - 2 * margin
     if text_width > room:
@@ -2064,8 +2266,12 @@ def number_stream(text: str, size: float, position: str, width: float, height: f
         x = width - margin - text_width
     else:
         x = (width - text_width) / 2
-    # 0.718 em is Helvetica's cap height, so top numbers stay inside the margin.
-    y = margin if vertical == "bottom" else height - margin - size * 0.718
+    # The baseline sits above the descenders at the bottom and below the cap
+    # height at the top, so neither is clipped on very short pages.
+    if vertical == "bottom":
+        y = margin + size * HELVETICA_DESCENDER
+    else:
+        y = height - margin - size * HELVETICA_CAP_HEIGHT
     return (
         f"BT /StampFont {pdf_number(size)} Tf 0 g "
         f"{pdf_number(x)} {pdf_number(y)} Td {stamp_text_operator(text)} ET"
@@ -2073,20 +2279,25 @@ def number_stream(text: str, size: float, position: str, width: float, height: f
 
 
 def watermark_stream(text: str, size: float, rotation: int, width: float, height: float) -> str:
-    # Shrink text that would not fit across the page (or along the diagonal).
+    # Shrink text whose box (turned by the rotation) would not fit in 90 % of
+    # the page, across and up: long text on narrow pages, big letters on
+    # short (landscape strip) pages.
     angle = math.radians(rotation)
     cos, sin = math.cos(angle), math.sin(angle)
-    room = 0.9 * (min(width / cos, height / sin) if rotation else width)
-    text_width = helvetica_width(text, size)
-    if text_width > room:
-        size *= room / text_width
-        text_width = room
+    em_width = helvetica_width(text, 1)
+    em_height = HELVETICA_CAP_HEIGHT + HELVETICA_DESCENDER
+    size = min(
+        size,
+        0.9 * width / (em_width * cos + em_height * sin),
+        0.9 * height / (em_width * sin + em_height * cos),
+    )
+    text_width = em_width * size
     return (
         "/StampAlpha gs 0.5 g "
         f"1 0 0 1 {pdf_number(width / 2)} {pdf_number(height / 2)} cm "
         f"{pdf_number(cos)} {pdf_number(sin)} {pdf_number(-sin)} {pdf_number(cos)} 0 0 cm "
         f"BT /StampFont {pdf_number(size)} Tf "
-        f"{pdf_number(-text_width / 2)} {pdf_number(-size * 0.359)} Td {stamp_text_operator(text)} ET"
+        f"{pdf_number(-text_width / 2)} {pdf_number(-size * (HELVETICA_CAP_HEIGHT - HELVETICA_DESCENDER) / 2)} Td {stamp_text_operator(text)} ET"
     )
 
 
@@ -2170,9 +2381,14 @@ def stamp_pdf(
                 ) from None
             size = parse_stamp_number(font_size or "60", "El tamaño de letra", *STAMP_WATERMARK_SIZE_RANGE)
             alpha = parse_stamp_number(opacity, "La opacidad", 0.1, 1, integer=False)
-            angle = int(parse_stamp_number(rotation, "La rotación", 0, 45))
+            # "45.0" is 45 too; anything else gets the same clear message.
+            try:
+                angle = float(rotation.replace(",", "."))
+            except ValueError:
+                angle = None
             if angle not in STAMP_ROTATIONS:
                 raise HTTPException(status_code=400, detail="La rotación debe ser 0 o 45 grados.")
+            angle = int(angle)
             suffix = "marca-de-agua"
 
         try:
@@ -2211,6 +2427,8 @@ METADATA_FIELDS = {
     "subject": "/Subject",
     "keywords": "/Keywords",
 }
+# Spanish labels for error messages (the form shows the same words).
+METADATA_LABELS = {"title": "Título", "author": "Autor", "subject": "Asunto", "keywords": "Palabras clave"}
 MAX_METADATA_LENGTH = 500
 PDF_DATE_PATTERN = re.compile(
     r"D:(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?(?:(Z)|([+-])(\d{2})'?(\d{2})?'?)?"
@@ -2345,7 +2563,7 @@ def edit_metadata(
             if len(value.strip()) > MAX_METADATA_LENGTH:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"El campo «{field}» no puede superar {MAX_METADATA_LENGTH} caracteres.",
+                    detail=f"El campo «{METADATA_LABELS[field]}» no puede superar {MAX_METADATA_LENGTH} caracteres.",
                 )
         reader = open_metadata_reader(file)
         with heavy_job(job_estimate_mb("metadata", upload_size(file))):
@@ -2356,6 +2574,10 @@ def edit_metadata(
                 del writer.root_object["/Metadata"]
             if remove_all:
                 writer.metadata = None
+                # Pages (and so their XMP) can carry metadata streams too.
+                for page in writer.pages:
+                    if "/Metadata" in page:
+                        del page[NameObject("/Metadata")]
             else:
                 if writer._info is None:
                     writer.metadata = {}
@@ -2525,10 +2747,10 @@ def extract_text(
 
     input_path.unlink(missing_ok=True)
     filename = clean_text_output_name(output_name.strip() or Path(file.filename).stem, "texto")
-    return FileResponse(
+    return file_download(
         text_path,
-        media_type="text/plain; charset=utf-8",
-        filename=filename,
+        filename,
+        "text/plain; charset=utf-8",
         headers={
             "X-Page-Count": str(len(numbers)),
             "X-Character-Count": str(character_count),
@@ -2616,7 +2838,8 @@ def parse_signature_placements(value: str) -> list[dict]:
     outside = HTTPException(status_code=400, detail="La firma debe quedar dentro de la página.")
     try:
         items = json.loads(value)
-    except ValueError as error:
+    except (ValueError, RecursionError) as error:
+        # RecursionError: "[[[[...]]]]" nested deeper than the parser allows.
         raise invalid from error
     if not isinstance(items, list) or not items:
         raise HTTPException(status_code=400, detail="Coloca la firma en al menos una página.")
@@ -2810,14 +3033,70 @@ def ocr_timeout(page_count: int) -> float:
     return min(OCR_TIMEOUT_BASE_SECONDS + OCR_TIMEOUT_PER_PAGE_SECONDS * page_count, OCR_TIMEOUT_MAX_SECONDS)
 
 
-def ocr_command(language: str, input_path: Path, output_path: Path) -> list[str]:
+def page_list(numbers: list[int]) -> str:
+    """1-based page numbers as ocrmypdf's --pages syntax: [1, 2, 3, 7] -> "1-3,7"."""
+    parts = []
+    start = previous = None
+    for number in numbers:
+        if previous is not None and number == previous + 1:
+            previous = number
+            continue
+        if start is not None:
+            parts.append(str(start) if start == previous else f"{start}-{previous}")
+        start = previous = number
+    if start is not None:
+        parts.append(str(start) if start == previous else f"{start}-{previous}")
+    return ",".join(parts)
+
+
+def pages_with_images(document: pypdfium2.PdfDocument) -> list[int]:
+    """1-based numbers of the pages that draw at least one image (also inside
+    form XObjects). Only those can hold scanned text; call under PDFIUM_LOCK."""
+    numbers = []
+    for index in range(len(document)):
+        page = document[index]
+        try:
+            if next(iter(page.get_objects(filter=[pypdfium2.raw.FPDF_PAGEOBJ_IMAGE])), None) is not None:
+                numbers.append(index + 1)
+        finally:
+            page.close()
+    return numbers
+
+
+def has_form_fields(path: Path) -> bool:
+    # ocrmypdf refuses --redo-ocr on PDFs with fillable forms.
+    try:
+        with path.open("rb") as source:
+            form = PdfReader(source).trailer["/Root"].get("/AcroForm")
+            return bool(form and form.get_object().get("/Fields"))
+    except Exception:
+        return False
+
+
+def ocr_command(
+    language: str, input_path: Path, output_path: Path, image_pages: list[int] | None = None
+) -> list[str]:
+    """The ocrmypdf command line.
+
+    With image_pages, those pages get --redo-ocr: the image parts are OCRed
+    even when the page already has some visible text (a stamped page number),
+    which is kept as it is, and an old invisible OCR layer is replaced. Pages
+    without images (digital text) are left out with --pages, so they are
+    copied unchanged and fast. Without image_pages (nothing to OCR, or a
+    fillable form, which --redo-ocr rejects) --skip-text copies pages that
+    have text. --rotate-pages turns sideways or upside-down scans upright
+    (Tesseract's osd data) so they are read correctly.
+    """
+    if image_pages:
+        mode = ["--redo-ocr", "--pages", page_list(image_pages)]
+    else:
+        mode = ["--skip-text"]
     return [
         sys.executable,
         "-m",
         "ocrmypdf",
-        # Pages that already have text are copied as they are, so a
-        # half-scanned document (or one that needs no OCR) does not fail.
-        "--skip-text",
+        *mode,
+        "--rotate-pages",
         "-l",
         language,
         # A plain PDF: PDF/A conversion is slower and changes more.
@@ -2879,6 +3158,7 @@ def ocr_pdf(
                 document = open_pdfium_checked(input_path)
                 try:
                     page_count = len(document)
+                    image_pages = pages_with_images(document) if page_count <= OCR_MAX_PAGES else []
                 finally:
                     document.close()
             if page_count > OCR_MAX_PAGES:
@@ -2886,12 +3166,14 @@ def ocr_pdf(
                     status_code=400,
                     detail=f"El OCR admite como máximo {OCR_MAX_PAGES} páginas por documento.",
                 )
+            if image_pages and has_form_fields(input_path):
+                image_pages = []
             # ocrmypdf keeps rasterized pages and intermediate PDFs in a scratch
             # folder under TMPDIR. A timeout kills it before it can clean up, so it
             # gets a private folder that is removed here whatever happens.
             with tempfile.TemporaryDirectory(prefix="pdf-toolkit-ocr-") as scratch:
                 result = run_tool(
-                    ocr_command(language, input_path, output_path),
+                    ocr_command(language, input_path, output_path, image_pages),
                     timeout=ocr_timeout(page_count),
                     env={**os.environ, "TMPDIR": scratch, "TEMP": scratch, "TMP": scratch},
                 )
@@ -2919,9 +3201,4 @@ def ocr_pdf(
         filename = clean_output_name(output_name)
     else:
         filename = clean_output_name(clean_base_name(Path(file.filename).stem, "documento") + "-ocr")
-    return FileResponse(
-        output_path,
-        media_type="application/pdf",
-        filename=filename,
-        background=BackgroundTask(remove_job_files),
-    )
+    return file_download(output_path, filename, background=BackgroundTask(remove_job_files))
