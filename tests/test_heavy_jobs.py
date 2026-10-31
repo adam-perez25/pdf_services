@@ -153,7 +153,12 @@ def test_estimates():
     megabyte = 1024 * 1024
     assert main.job_estimate_mb("protect", 200 * megabyte) == 700
     assert main.job_estimate_mb("merge", 100 * megabyte, 100 * megabyte) == 260
-    assert main.job_estimate_mb("compress", 0) == 300
+    assert main.job_estimate_mb("compress", 60 * megabyte) == 330
+    # Small files never wait, even on tools with a big fixed part.
+    for tool in main.HEAVY_JOB_ESTIMATES:
+        assert main.job_estimate_mb(tool, 2 * megabyte) == 0, tool
+    assert main.job_estimate_mb("merge", 20 * megabyte, 20 * megabyte) == 0
+    assert main.job_estimate_mb("merge", 30 * megabyte, 30 * megabyte) == 78
     # The usual few-MB PDF never waits in pypdf tools.
     assert main.job_estimate_mb("stamp", 5 * megabyte) < main.HEAVY_JOB_MIN_MB
 
@@ -203,6 +208,8 @@ def slow_compress(limiter, monkeypatch):
     monkeypatch.setattr(main, "run_tool", fake_run_tool)
     # Every compression counts as bigger than the whole budget.
     monkeypatch.setattr(main, "HEAVY_JOB_ESTIMATES", {**main.HEAVY_JOB_ESTIMATES, "compress": (0, 1500)})
+    # The sample PDF is tiny; let it count as a big job for these tests.
+    monkeypatch.setattr(main, "HEAVY_JOB_SMALL_FILES_MB", 0)
     return started, release
 
 

@@ -251,8 +251,9 @@ más para Ghostscript, Tesseract o LibreOffice; la tabla está en
 `HEAVY_JOB_ESTIMATES`) y la reserva de un presupuesto común
 (`HEAVY_JOB_BUDGET_MB`). Si no cabe, la petición espera su turno por orden de
 llegada; un trabajo mayor que todo el presupuesto se ejecuta solo. Los
-trabajos pequeños (estimación menor de `HEAVY_JOB_MIN_MB`, como los PDF
-habituales de pocos MB) nunca esperan. Si el turno no llega en
+trabajos pequeños (archivos de menos de `HEAVY_JOB_SMALL_FILES_MB` en total,
+como los PDF habituales de pocos MB, o con una estimación menor de
+`HEAVY_JOB_MIN_MB`) nunca esperan, sea cual sea la herramienta. Si el turno no llega en
 `HEAVY_JOB_WAIT_SECONDS`, la respuesta es `503` («El servidor está ocupado con
 otros documentos grandes...») con la cabecera `Retry-After`. Las peticiones en
 espera ocupan un hilo del servidor (hay 40), lo que sobra para un uso personal.
@@ -276,6 +277,7 @@ Otros valores fijos, definidos como constantes en `app/main.py`:
 | `OCR_LANGUAGES` | `spa`, `eng`, `spa+eng` | Idiomas admitidos por el OCR. |
 | `OCR_JOBS` | 2 | Páginas que Tesseract procesa a la vez en cada petición de OCR. |
 | `HEAVY_JOB_MIN_MB` | 100 MB | Los trabajos con una estimación menor no reservan memoria ni esperan turno. |
+| `HEAVY_JOB_SMALL_FILES_MB` | 50 MB | Los trabajos sobre archivos que suman menos que esto no esperan turno en ninguna herramienta. |
 | `HEAVY_JOB_RETRY_AFTER_SECONDS` | 60 s | Valor de `Retry-After` cuando el servidor está ocupado. |
 
 Si una conversión, compresión u OCR supera su tiempo máximo, se termina el proceso

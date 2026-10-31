@@ -460,6 +460,10 @@ HEAVY_JOB_WAIT_SECONDS = env_int("HEAVY_JOB_WAIT_SECONDS", 300, 1, 24 * 3600)
 HEAVY_JOB_MAX_WAITING = env_int("HEAVY_JOB_MAX_WAITING", 10, 1, 1000)
 # Jobs estimated below this many MB never wait and reserve nothing.
 HEAVY_JOB_MIN_MB = 100
+# Jobs on files smaller than this (in total) never wait either, whatever the
+# tool: the fixed part of an estimate (Ghostscript, LibreOffice...) is a
+# worst case for big documents, and the usual few-MB PDFs must not queue.
+HEAVY_JOB_SMALL_FILES_MB = 50
 HEAVY_JOB_RETRY_AFTER_SECONDS = 60
 HEAVY_JOB_BUSY_MESSAGE = (
     "El servidor está ocupado con otros documentos grandes. "
@@ -491,7 +495,12 @@ HEAVY_JOB_ESTIMATES = {
 
 
 def job_estimate_mb(tool: str, *sizes: int) -> int:
-    """Estimated memory in MB of running `tool` on files of these byte sizes."""
+    """Estimated memory in MB of running `tool` on files of these byte sizes.
+
+    Small files give 0, so heavy_job lets them through without waiting.
+    """
+    if sum(sizes) < HEAVY_JOB_SMALL_FILES_MB * 1024 * 1024:
+        return 0
     factor, fixed = HEAVY_JOB_ESTIMATES[tool]
     return math.ceil(factor * sum(sizes) / (1024 * 1024) + fixed)
 
