@@ -24,3 +24,10 @@ services:
       OCR_TIMEOUT_SECONDS: "60"
       OCR_SECONDS_PER_PAGE: "20"
       OCR_MAX_TIMEOUT_SECONDS: "14400"
+      # PDF to images: total pixel cap (10000 Mpx = 1000 A4 pages at 300 dpi),
+      # free temp disk kept after the estimated output, and time limit.
+      PDF_TO_IMAGES_MAX_MEGAPIXELS: "10000"
+      PDF_TO_IMAGES_MIN_FREE_MB: "512"
+      PDF_TO_IMAGES_TIMEOUT_SECONDS: "300"
+      PDF_TO_IMAGES_SECONDS_PER_PAGE: "3"
+      PDF_TO_IMAGES_MAX_TIMEOUT_SECONDS: "7200"

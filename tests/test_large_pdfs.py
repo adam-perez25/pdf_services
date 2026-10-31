@@ -164,6 +164,32 @@ def make_old(path: Path) -> None:
     os.utime(path, (old, old))
 
 
+def test_pdf_to_images_selected_pages_of_a_long_pdf(client, large_pdf, documents_dir):
+    response = client.post(
+        "/api/pdf-to-images", files=upload(large_pdf), data={"dpi": "72", "pages": "1499-1500"},
+    )
+
+    assert response.status_code == 200
+    with zipfile.ZipFile(BytesIO(response.content)) as archive:
+        assert archive.namelist() == ["grande-page-1499.png", "grande-page-1500.png"]
+    assert list(documents_dir.iterdir()) == []
+
+
+def test_pdf_to_images_long_pdf_over_the_pixel_cap_is_rejected_up_front(
+    client, large_pdf, documents_dir, monkeypatch,
+):
+    monkeypatch.setattr(main, "PDF_TO_IMAGES_MAX_MEGAPIXELS", 1000)
+    rendered = []
+    monkeypatch.setattr(main.pypdfium2.PdfPage, "render", lambda *args, **kwargs: rendered.append(1))
+
+    response = client.post("/api/pdf-to-images", files=upload(large_pdf), data={"dpi": "300"})
+
+    assert response.status_code == 400
+    assert "1500 páginas a 300 ppp" in response.json()["detail"]
+    assert rendered == []
+    assert list(documents_dir.iterdir()) == []
+
+
 def test_sweeper_skips_files_of_running_jobs(documents_dir):
     running = documents_dir / f"{'a' * 32}.in.pdf"
     abandoned = documents_dir / f"{'b' * 32}.in.pdf"
@@ -290,6 +316,8 @@ SETTINGS = [
     "MAX_UPLOAD_MB", "MAX_TOTAL_UPLOAD_MB", "OFFICE_TIMEOUT_SECONDS",
     "COMPRESSION_TIMEOUT_SECONDS", "COMPRESSION_SECONDS_PER_PAGE",
     "COMPRESSION_MAX_TIMEOUT_SECONDS", "DOCUMENT_TTL_SECONDS", "DOCUMENT_SWEEP_SECONDS",
+    "PDF_TO_IMAGES_MAX_MEGAPIXELS", "PDF_TO_IMAGES_MIN_FREE_MB", "PDF_TO_IMAGES_TIMEOUT_SECONDS",
+    "PDF_TO_IMAGES_SECONDS_PER_PAGE", "PDF_TO_IMAGES_MAX_TIMEOUT_SECONDS",
 ]
 
 
@@ -315,6 +343,11 @@ def test_defaults_and_environment_overrides():
         "COMPRESSION_MAX_TIMEOUT_SECONDS": 3600,
         "DOCUMENT_TTL_SECONDS": 1800,
         "DOCUMENT_SWEEP_SECONDS": 300,
+        "PDF_TO_IMAGES_MAX_MEGAPIXELS": 10000,
+        "PDF_TO_IMAGES_MIN_FREE_MB": 512,
+        "PDF_TO_IMAGES_TIMEOUT_SECONDS": 300,
+        "PDF_TO_IMAGES_SECONDS_PER_PAGE": 3,
+        "PDF_TO_IMAGES_MAX_TIMEOUT_SECONDS": 7200,
     }
 
     # Without MAX_TOTAL_UPLOAD_MB, the total follows a raised per-file limit.
@@ -329,12 +362,19 @@ def test_defaults_and_environment_overrides():
     assert (values["MAX_UPLOAD_MB"], values["MAX_TOTAL_UPLOAD_MB"]) == (800, 2000)
     assert values["COMPRESSION_SECONDS_PER_PAGE"] == 5
 
+    images = import_settings(PDF_TO_IMAGES_MAX_MEGAPIXELS="20000", PDF_TO_IMAGES_MIN_FREE_MB="0")
+    assert images.returncode == 0, images.stderr
+    image_values = json.loads(images.stdout)
+    assert image_values["PDF_TO_IMAGES_MAX_MEGAPIXELS"] == 20000
+    assert image_values["PDF_TO_IMAGES_MIN_FREE_MB"] == 0
+
 
 @pytest.mark.parametrize(
     "env, message",
     [
         ({"MAX_UPLOAD_MB": "mucho"}, "MAX_UPLOAD_MB"),
         ({"DOCUMENT_TTL_SECONDS": "5"}, "DOCUMENT_TTL_SECONDS"),
+        ({"PDF_TO_IMAGES_MAX_MEGAPIXELS": "0"}, "PDF_TO_IMAGES_MAX_MEGAPIXELS"),
         ({"MAX_UPLOAD_MB": "600", "MAX_TOTAL_UPLOAD_MB": "500"}, "no puede ser menor"),
     ],
 )

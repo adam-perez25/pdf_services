@@ -29,11 +29,15 @@ mismo servidor y no requiere un frontend independiente.
   libro pasan al PDF.
 - **PowerPoint a PDF:** convierte archivos `.ppt` y `.pptx`, con una página
   por diapositiva.
-- **PDF a imágenes:** convierte cada página de un PDF en una imagen PNG o JPG
-  a 72, 150 o 300 ppp. Las imágenes se descargan juntas en un ZIP (o como una
-  sola imagen si el PDF tiene una página). Las páginas muy grandes se
-  renderizan a menor resolución para no superar unos 40 millones de píxeles
-  por imagen.
+- **PDF a imágenes:** convierte las páginas de un PDF (todas, o solo las
+  indicadas, por ejemplo `1-3, 5`) en imágenes PNG o JPG a 72, 150 o 300 ppp.
+  Las imágenes conservan el número real de página en el nombre y se descargan
+  juntas en un ZIP (o como una sola imagen si se convierte una página). Las
+  páginas muy grandes se renderizan a menor resolución para no superar unos
+  40 millones de píxeles por imagen. Antes de empezar se estima el tamaño del
+  resultado: si supera el máximo de píxeles o no cabe en el disco temporal se
+  rechaza indicando las páginas y el tamaño estimado, y una conversión que
+  tarda demasiado se cancela (ver `PDF_TO_IMAGES_*` en la configuración).
 - **Comprimir PDF:** reduce el tamaño bajando la resolución de las imágenes
   mediante Ghostscript, ideal para documentos escaneados. Tres niveles: máxima
   (72 ppp), recomendada (150 ppp) y alta calidad (300 ppp). Si el resultado no
@@ -226,6 +230,11 @@ variable falla.
 | `OCR_TIMEOUT_SECONDS` | 60 s | 10-86400 | Tiempo base del OCR. |
 | `OCR_SECONDS_PER_PAGE` | 20 s | 0-3600 | Tiempo extra del OCR por cada página. |
 | `OCR_MAX_TIMEOUT_SECONDS` | 14400 s | 10-604800 | Tope del tiempo del OCR (4 horas); si se supera responde `504`. |
+| `PDF_TO_IMAGES_MAX_MEGAPIXELS` | 10000 | 1-1000000 | Máximo de millones de píxeles en total de **PDF a imágenes** (suma de las páginas elegidas a la resolución elegida); si se supera responde `400` antes de empezar. Una página A4 son unos 2,2 millones a 150 ppp y 8,7 a 300 ppp: se admiten 1000 páginas A4 a 300 ppp, pero no 2000. |
+| `PDF_TO_IMAGES_MIN_FREE_MB` | 512 MB | 0-1000000 | Espacio que debe quedar libre en el disco temporal tras el tamaño estimado de las imágenes (unos 0,5 bytes por píxel en PNG y 0,2 en JPG); si no cabe responde `507` antes de empezar. |
+| `PDF_TO_IMAGES_TIMEOUT_SECONDS` | 300 s | 10-86400 | Tiempo base de **PDF a imágenes**. |
+| `PDF_TO_IMAGES_SECONDS_PER_PAGE` | 3 s | 0-600 | Tiempo extra por página convertida (20 páginas: 360 s; 1000 páginas: 3300 s). Se comprueba entre página y página; si se supera se cancela, se borran los archivos temporales y responde `504`. |
+| `PDF_TO_IMAGES_MAX_TIMEOUT_SECONDS` | 7200 s | 10-604800 | Tope del tiempo de **PDF a imágenes** (nunca menor que el tiempo base). |
 | `DOCUMENT_TTL_SECONDS` | 1800 s (30 min) | 60-604800 | Tiempo sin uso tras el que se borran los documentos de **Organizar páginas** y los archivos temporales que hayan quedado. |
 | `DOCUMENT_SWEEP_SECONDS` | 300 s (5 min) | 10-86400 | Frecuencia de esa limpieza. |
 
@@ -246,6 +255,7 @@ Otros valores fijos, definidos como constantes en `app/main.py`:
 | --- | --- | --- |
 | `MULTIPART_OVERHEAD_MB` | 1 MB | Margen para los separadores y campos del formulario. Una petición mayor que `MAX_TOTAL_UPLOAD_MB` + este margen se rechaza con `413` antes de guardarse en disco (por su `Content-Length`, o en cuanto lo supera si no lo indica). |
 | `MAX_IMAGE_PIXELS` | 40 000 000 | Límite de píxeles por imagen en **PDF a imágenes**. |
+| `IMAGE_BYTES_PER_PIXEL` | PNG 0,5 / JPG 0,2 | Bytes por píxel con los que **PDF a imágenes** estima el tamaño del resultado. Una página de texto ocupa mucho menos en PNG y una escaneada o con fotos bastante más; si el disco se llena durante la conversión se cancela igualmente con `507`. |
 | `STAMP_NUMBER_SIZE_RANGE` | 6-72 pt | Tamaños de letra admitidos para los números de página. |
 | `STAMP_WATERMARK_SIZE_RANGE` | 8-200 pt | Tamaños de letra admitidos para la marca de agua (se reduce si el texto no cabe). |
 | `STAMP_WATERMARK_MAX_LENGTH` | 100 | Longitud máxima del texto de la marca de agua. |
@@ -289,7 +299,7 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 | `POST` | `/api/split` | Extrae un rango mediante `start_page` y `end_page`. |
 | `POST` | `/api/split-zip` | Divide un PDF en una sola petición y devuelve un ZIP. `mode=pages` crea un PDF por página (`base_name`); `mode=ranges` usa `ranges` (`1-3, 4-6`) y la lista JSON `names`. Si solo resulta un archivo, devuelve el PDF directamente. |
 | `POST` | `/api/images-to-pdf` | Convierte las imágenes recibidas como `images`. |
-| `POST` | `/api/pdf-to-images` | Convierte cada página de un PDF en una imagen; `image_format` es `png` (por defecto) o `jpg`, `dpi` es `72`, `150` (por defecto) o `300` y `base_name` da nombre a las imágenes (`<base_name>-page-001.png`). Devuelve un ZIP, o la imagen directamente si el PDF tiene una página. |
+| `POST` | `/api/pdf-to-images` | Convierte cada página de un PDF en una imagen; `image_format` es `png` (por defecto) o `jpg`, `dpi` es `72`, `150` (por defecto) o `300`, `pages` elige las páginas con la sintaxis `1-3, 5` (vacío = todas; una página repetida se convierte una vez) y `base_name` da nombre a las imágenes con el número real de página (`<base_name>-page-001.png`). Devuelve un ZIP, o la imagen directamente si se convierte una sola página. `400` si supera `PDF_TO_IMAGES_MAX_MEGAPIXELS`, `507` si el resultado estimado no cabe en el disco temporal o este se llena, `504` si tarda demasiado. |
 | `POST` | `/api/word-to-pdf` | Convierte un archivo `.doc` o `.docx`. |
 | `POST` | `/api/excel-to-pdf` | Convierte un archivo `.xls` o `.xlsx`. |
 | `POST` | `/api/powerpoint-to-pdf` | Convierte un archivo `.ppt` o `.pptx`. |
@@ -327,7 +337,10 @@ Los errores devuelven un JSON con `detail` en español:
 - `413`: un archivo supera `MAX_UPLOAD_MB` o el conjunto supera
   `MAX_TOTAL_UPLOAD_MB`.
 - `503`: falta LibreOffice, Ghostscript, OCRmyPDF o Tesseract (o un idioma
-  de Tesseract). `504`: la conversión, la compresión o el OCR tardó demasiado.
+  de Tesseract). `504`: la conversión, la compresión, el OCR o **PDF a
+  imágenes** tardó demasiado.
+- `507`: **PDF a imágenes** no cabe en el disco temporal del servidor (según
+  la estimación previa, o porque el disco se llenó durante la conversión).
 - `410`: el documento de **Organizar páginas** o **Firmar PDF** ha caducado.
 
 La documentación interactiva generada por FastAPI está disponible en

@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager, contextmanager
+import errno
 import importlib.util
 from io import BytesIO
 import json
@@ -952,6 +953,113 @@ IMAGE_DPI_CHOICES = {72, 150, 300}
 # memory, so such pages are rendered at a lower resolution instead.
 MAX_IMAGE_PIXELS = 40_000_000
 
+# Guards for converting very long documents, checked before rendering anything.
+# An A4 page is about 2.2 million pixels at 150 ppp and 8.7 million at 300 ppp,
+# so the default of 10 000 megapixels allows 1000 A4 pages at 300 ppp (8.7 Gpx)
+# or about 4500 at 150 ppp, but rejects 2000 A4 pages at 300 ppp (17.4 Gpx),
+# which would take most of an hour and many GB of temporary disk.
+PDF_TO_IMAGES_MAX_MEGAPIXELS = env_int("PDF_TO_IMAGES_MAX_MEGAPIXELS", 10_000, 1, 1_000_000)
+# Space that must stay free in the temporary folder after the estimated output.
+PDF_TO_IMAGES_MIN_FREE_MB = env_int("PDF_TO_IMAGES_MIN_FREE_MB", 512, 0, 1_000_000)
+PDF_TO_IMAGES_TIMEOUT_SECONDS = env_int("PDF_TO_IMAGES_TIMEOUT_SECONDS", 300, 10, 24 * 3600)
+PDF_TO_IMAGES_SECONDS_PER_PAGE = env_int("PDF_TO_IMAGES_SECONDS_PER_PAGE", 3, 0, 600)
+PDF_TO_IMAGES_MAX_TIMEOUT_SECONDS = env_int("PDF_TO_IMAGES_MAX_TIMEOUT_SECONDS", 7200, 10, 7 * 24 * 3600)
+# Estimated bytes per output pixel, used only for the up-front disk check. A
+# text page takes well under 0.1 byte per pixel in PNG and a scanned or photo
+# page 1-3; 0.5 covers typical mixed documents without rejecting ordinary text
+# ones. JPG at quality 90 is several times smaller. The real write still stops
+# cleanly if the disk fills anyway.
+IMAGE_BYTES_PER_PIXEL = {"png": 0.5, "jpg": 0.2}
+
+
+def pdf_to_images_timeout(page_count: int) -> float:
+    scaled = PDF_TO_IMAGES_TIMEOUT_SECONDS + PDF_TO_IMAGES_SECONDS_PER_PAGE * page_count
+    # The cap never cuts below the base time.
+    return min(scaled, max(PDF_TO_IMAGES_MAX_TIMEOUT_SECONDS, PDF_TO_IMAGES_TIMEOUT_SECONDS))
+
+
+def render_scale(width: float, height: float, dpi: int) -> float:
+    """Scale for rendering a page of width x height points at dpi.
+
+    Pages over MAX_IMAGE_PIXELS are rendered smaller; the estimate and the
+    real render both use this function, so they agree.
+    """
+    scale = dpi / 72
+    pixels = width * height * scale * scale
+    if pixels > MAX_IMAGE_PIXELS:
+        scale *= (MAX_IMAGE_PIXELS / pixels) ** 0.5
+    return scale
+
+
+def selected_page_numbers(pages: str, page_count: int) -> list[int]:
+    """1-based page numbers in the parse_page_ranges syntax; empty = all.
+
+    A page listed twice is converted once (its image name would repeat).
+    """
+    if not pages.strip():
+        return list(range(1, page_count + 1))
+    numbers = (
+        number
+        for start, end in parse_page_ranges(pages, page_count)
+        for number in range(start, end + 1)
+    )
+    return list(dict.fromkeys(numbers))
+
+
+def format_size_es(size: float) -> str:
+    if size >= 1024 ** 3:
+        return f"{size / 1024 ** 3:.1f} GB".replace(".", ",")
+    return f"{max(1, round(size / 1024 ** 2))} MB"
+
+
+def format_megapixels_es(pixels: float) -> str:
+    megapixels = pixels / 1_000_000
+    if megapixels < 10:
+        return f"{megapixels:.1f}".replace(".", ",")
+    return f"{round(megapixels):,}".replace(",", ".")
+
+
+def is_disk_full(error: BaseException | None) -> bool:
+    # Closing the ZIP after a failed write can raise a second error, so the
+    # original one may be further down the context chain.
+    while error is not None:
+        if isinstance(error, OSError) and error.errno == errno.ENOSPC:
+            return True
+        error = error.__context__
+    return False
+
+
+def check_pdf_to_images_budget(total_pixels: float, page_total: int, dpi: int, image_format: str):
+    """Reject a conversion that is too big, before rendering anything."""
+    estimated_bytes = total_pixels * IMAGE_BYTES_PER_PIXEL[image_format]
+    request = f"Convertir {'1 página' if page_total == 1 else f'{page_total} páginas'} a {dpi} ppp"
+    if total_pixels > PDF_TO_IMAGES_MAX_MEGAPIXELS * 1_000_000:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{request} daría unos {format_megapixels_es(total_pixels)} millones de "
+                f"píxeles (unos {format_size_es(estimated_bytes)} de imágenes), más del máximo "
+                f"de {format_megapixels_es(PDF_TO_IMAGES_MAX_MEGAPIXELS * 1_000_000)} millones. "
+                "Elige menos páginas o una resolución menor."
+            ),
+        )
+    free = shutil.disk_usage(DOCUMENTS_DIR).free
+    if estimated_bytes + PDF_TO_IMAGES_MIN_FREE_MB * 1024 * 1024 > free:
+        raise HTTPException(
+            status_code=507,
+            detail=(
+                f"{request} ocuparía unos {format_size_es(estimated_bytes)} y no hay espacio "
+                f"suficiente en el disco temporal del servidor ({format_size_es(free)} libres). "
+                "Elige menos páginas, una resolución menor o el formato JPG."
+            ),
+        )
+
+
+DISK_FULL_IMAGES_MESSAGE = (
+    "El disco temporal del servidor se ha llenado al crear las imágenes y se ha cancelado "
+    "la conversión. Elige menos páginas, una resolución menor o el formato JPG."
+)
+
 
 @app.post("/api/pdf-to-images")
 def pdf_to_images(
@@ -959,11 +1067,17 @@ def pdf_to_images(
     image_format: str = Form("png"),
     dpi: int = Form(150),
     base_name: str = Form(""),
+    pages: str = Form(""),
 ):
-    """Render every page of a PDF as a PNG or JPG image.
+    """Render the pages of a PDF as PNG or JPG images.
 
-    The images are named <base_name>-page-NNN.<ext> and returned as a ZIP; a
-    one-page PDF is returned as a plain image.
+    pages uses the parse_page_ranges syntax ("1-3, 5"); empty means all pages.
+    The images are named <base_name>-page-NNN.<ext> with the real page number
+    and returned as a ZIP; a single selected page is returned as a plain image.
+    Before rendering, the total pixels and the estimated output size are
+    checked (400 over PDF_TO_IMAGES_MAX_MEGAPIXELS, 507 if it would not fit in
+    the temporary disk); a job over pdf_to_images_timeout answers 504, and a
+    disk that fills while writing answers 507.
     """
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
@@ -994,10 +1108,7 @@ def pdf_to_images(
         with PDFIUM_LOCK:
             pdf_page = document[index]
             try:
-                scale = dpi / 72
-                pixels = pdf_page.get_width() * pdf_page.get_height() * scale * scale
-                if pixels > MAX_IMAGE_PIXELS:
-                    scale *= (MAX_IMAGE_PIXELS / pixels) ** 0.5
+                scale = render_scale(pdf_page.get_width(), pdf_page.get_height(), dpi)
                 bitmap = pdf_page.render(scale=scale)
                 image = bitmap.to_pil().convert("RGB")
                 bitmap.close()
@@ -1020,17 +1131,39 @@ def pdf_to_images(
                 document = open_pdfium_checked(input_path)
                 page_count = len(document)
             try:
-                digits = max(3, len(str(page_count)))
-                names = [f"{base}-page-{page:0{digits}d}.{image_format}" for page in range(1, page_count + 1)]
+                numbers = selected_page_numbers(pages, page_count)
+                # Estimate from the page sizes (no page is loaded or rendered).
+                with PDFIUM_LOCK:
+                    total_pixels = 0.0
+                    for number in numbers:
+                        width, height = document.get_page_size(number - 1)
+                        scale = render_scale(width, height, dpi)
+                        total_pixels += width * height * scale * scale
+                check_pdf_to_images_budget(total_pixels, len(numbers), dpi, image_format)
 
-                if page_count == 1:
-                    single_image = render_page_image(document, 0)
+                digits = max(3, len(str(page_count)))
+                names = [f"{base}-page-{number:0{digits}d}.{image_format}" for number in numbers]
+                deadline = time.monotonic() + pdf_to_images_timeout(len(numbers))
+
+                if len(numbers) == 1:
+                    single_image = render_page_image(document, numbers[0] - 1)
                 else:
                     single_image = None
                     # PNG and JPG are already compressed, so they are stored as is.
                     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as archive:
-                        for index, name in enumerate(names):
-                            archive.writestr(name, render_page_image(document, index))
+                        for done, (number, name) in enumerate(zip(numbers, names), start=1):
+                            archive.writestr(name, render_page_image(document, number - 1))
+                            # Rendering runs in-process (no subprocess to
+                            # kill), so the time limit is checked between pages.
+                            if done < len(numbers) and time.monotonic() > deadline:
+                                raise HTTPException(
+                                    status_code=504,
+                                    detail=(
+                                        f"La conversión tardó demasiado y se ha cancelado tras "
+                                        f"{done} de {len(numbers)} páginas. Elige menos páginas, "
+                                        "una resolución menor o el formato JPG."
+                                    ),
+                                )
             finally:
                 with PDFIUM_LOCK:
                     document.close()
@@ -1039,6 +1172,9 @@ def pdf_to_images(
         raise
     except Exception as error:
         remove_job_files()
+        if is_disk_full(error):
+            logger.warning("Disk full while converting a PDF to images: %s", error)
+            raise HTTPException(status_code=507, detail=DISK_FULL_IMAGES_MESSAGE) from error
         raise processing_error("No se pudo convertir el PDF en imágenes.", error) from error
     finally:
         file.file.close()

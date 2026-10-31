@@ -16,7 +16,7 @@ paths:
   | word, excel, powerpoint | office.js (shared) |
   | pages | pages.js (largest, ~450 lines) |
   | compress | compress.js |
-  | pdf-to-images | pdf-to-images.js |
+  | pdf-to-images | pdf-to-images.js (optional `#pdf-images-pages` range field sent as `pages`; 400/504/507 guard messages shown via `errorMessage`) |
   | protect | protect.js (Proteger/Desbloquear mode select; password only in the multipart body) |
   | stamp | stamp.js (mode select toggles `#stamp-numbers-options` / `#stamp-watermark-options`) |
   | metadata | metadata.js (reads `/api/metadata/read` on file choice to prefill) |

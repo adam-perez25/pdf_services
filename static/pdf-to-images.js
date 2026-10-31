@@ -4,6 +4,7 @@ const pdfImagesDropzone = document.querySelector("#pdf-images-dropzone");
 const pdfImagesFileName = document.querySelector("#pdf-images-file-name");
 const pdfImagesFormat = document.querySelector("#pdf-images-format");
 const pdfImagesDpi = document.querySelector("#pdf-images-dpi");
+const pdfImagesPages = document.querySelector("#pdf-images-pages");
 const pdfImagesBaseName = document.querySelector("#pdf-images-base-name");
 const pdfImagesStatus = document.querySelector("#pdf-images-status");
 const setStatus = statusSetter(pdfImagesStatus);
@@ -39,6 +40,8 @@ pdfImagesForm.addEventListener("submit", async (event) => {
     formData.append("image_format", pdfImagesFormat.value);
     formData.append("dpi", pdfImagesDpi.value);
     formData.append("base_name", baseName);
+    // Empty means all pages; the server checks the syntax and the size.
+    formData.append("pages", pdfImagesPages.value.trim());
     setStatus("Convirtiendo las páginas... los documentos largos pueden tardar un poco.", false);
 
     try {
