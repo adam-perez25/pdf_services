@@ -169,6 +169,8 @@ como constantes en `app/main.py`:
 | `OFFICE_TIMEOUT_SECONDS` | 120 s | Tiempo máximo de una conversión con LibreOffice; si se supera responde `504`. |
 | `COMPRESSION_TIMEOUT_SECONDS` | 600 s | Tiempo máximo de la compresión con Ghostscript; si se supera responde `504`. |
 | `MAX_IMAGE_PIXELS` | 40 000 000 | Límite de píxeles por imagen en **PDF a imágenes**. |
+| `MAX_UPLOAD_MB` | 50 MB | Tamaño máximo de cada archivo subido; si se supera responde `413`. |
+| `MAX_TOTAL_UPLOAD_MB` | 200 MB | Tamaño máximo de todos los archivos de una petición (**Unir PDF**, **Imágenes a PDF**); si se supera responde `413`. |
 
 Si una conversión o compresión supera su tiempo máximo, se termina el proceso
 externo junto con todos los procesos que haya iniciado.
@@ -215,6 +217,17 @@ Los endpoints que generan archivos aceptan el campo opcional `output_name`
 para indicar el nombre de la descarga. Las peticiones de archivos usan
 `multipart/form-data`.
 
+Los errores devuelven un JSON con `detail` en español:
+
+- `400`: archivo o parámetros no válidos, o PDF protegido con contraseña (hay
+  que desbloquearlo antes; los PDF que solo tienen contraseña de propietario
+  se procesan con normalidad). El detalle técnico del error no se envía al
+  cliente: queda en el registro del servidor (`docker compose logs`).
+- `413`: un archivo supera `MAX_UPLOAD_MB` o el conjunto supera
+  `MAX_TOTAL_UPLOAD_MB`.
+- `503`: falta LibreOffice o Ghostscript. `504`: la conversión tardó demasiado.
+- `410`: el documento de **Organizar páginas** ha caducado.
+
 La documentación interactiva generada por FastAPI está disponible en
 [`/docs`](http://localhost:8000/docs) cuando el servidor está en ejecución.
 También se puede consultar el esquema OpenAPI en
@@ -259,7 +272,7 @@ requirements-dev.txt  # Dependencias para ejecutar las pruebas
 
 El servidor está configurado para uso local y para ejecutarse detrás de un
 contenedor. Antes de exponerlo públicamente conviene añadir, según el entorno,
-autenticación, límites de tamaño y frecuencia de subida, HTTPS y una política
+autenticación, límites de frecuencia de subida, HTTPS y una política
 de gestión de errores y registros. Los documentos subidos pueden contener
 información sensible: utiliza el servicio únicamente en un entorno de
 confianza y revisa la configuración de red del despliegue.
@@ -269,7 +282,9 @@ respuestas llevan cabeceras de seguridad (`Content-Security-Policy` que solo
 permite recursos del propio servidor, `X-Content-Type-Options: nosniff`,
 `X-Frame-Options: DENY` y `Referrer-Policy: no-referrer`). Los archivos de
 `/static` se sirven con `Cache-Control: no-cache` para que el navegador
-compruebe si hay una versión nueva tras reconstruir la imagen.
+compruebe si hay una versión nueva tras reconstruir la imagen. Las subidas
+tienen un tamaño máximo (`MAX_UPLOAD_MB` y `MAX_TOTAL_UPLOAD_MB`) y
+`docker-compose.yml` limita la memoria del contenedor a 1 GB (`mem_limit`).
 
 La interfaz no carga recursos externos: las fuentes Manrope y DM Mono se
 sirven desde `static/fonts/`, distribuidas bajo la SIL Open Font License, por

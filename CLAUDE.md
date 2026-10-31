@@ -4,7 +4,7 @@ Web PDF toolkit (FastAPI + Uvicorn) run with Docker Compose. Merge, split, compr
 
 - Code: `app/main.py`. Templates in `templates/`, frontend assets in `static/`.
 - Tests: `python -m pytest` (config in `pytest.ini`, tests in `tests/`, one file per tool). Dev deps in `requirements-dev.txt`.
-- Docker: `docker compose up --build -d`, service `unir-pdf` on http://localhost:8000, health at `/health`. The container runs as a non-root user; tests are not part of the image.
+- Docker: `docker compose up --build -d`, service `unir-pdf` on http://localhost:8000, health at `/health`. The container runs as a non-root user with `mem_limit: 1g`; tests are not part of the image.
 - Office conversions need LibreOffice; Compress PDF needs Ghostscript. Tests that need them are skipped if missing.
 
 ## Commands available in this project
@@ -30,7 +30,8 @@ Spanish-language web PDF toolkit, `FastAPI(title="Unir PDF")` (`app/main.py:46`)
 - `uvicorn app.main:app`. `lifespan` (main.py:40) runs `start_document_sweeper` (507): purge DOCUMENTS_DIR, then a daemon thread `sweep_documents_forever` (498).
 - Page routes `GET /`, `/merge`, `/split`, ... (main.py:83-130) -> `render_page`.
 - Tool request: `postForm()` in common.js -> multipart POST `/api/*`. Handler is a sync `def`, so it runs in a worker thread (main.py:224). It validates the extension and options, processes the file, and returns an attachment named by `clean_output_name` (216). `file.file.close()` runs in `finally`.
-- Error codes: 400 bad input, 503 LibreOffice/Ghostscript missing, 504 timeout, 410 expired organizer document.
+- Error codes: 400 bad input or password-protected PDF, 413 upload too big, 503 LibreOffice/Ghostscript missing, 504 timeout, 410 expired organizer document.
+- Hardening helpers (after `clean_output_name`): every `/api` upload handler calls `check_upload_sizes` (413 over `MAX_UPLOAD_MB` per file / `MAX_TOTAL_UPLOAD_MB` per request; measured by seeking, not reading). Generic failures use `processing_error(msg, error)`: Spanish `detail` without the exception text, raw error logged. PDFs are opened with `open_pdf_reader` (pypdf) or `open_pdfium_checked` (pdfium), which raise 400 `ENCRYPTED_PDF_MESSAGE` for password-protected files (owner-only passwords still open).
 - In memory: merge (226), pdf-info (271), split (288), images-to-pdf (693), edit-pages (646).
 - Temp files in DOCUMENTS_DIR, removed with a `BackgroundTask`: split-zip (366), pdf-to-images (754), compress (960).
 - Office: `convert_office_to_pdf` (885) uses a `TemporaryDirectory` and a throwaway LibreOffice profile.
