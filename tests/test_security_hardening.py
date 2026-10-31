@@ -47,7 +47,7 @@ def test_office_conversion_seeds_a_locked_down_profile(client, monkeypatch):
 
     monkeypatch.setattr(main, "find_soffice", lambda: "soffice")
     monkeypatch.setattr(main, "run_tool", fake_run_tool)
-    response = client.post("/api/word-to-pdf", files={"file": ("doc.docx", b"PK fake")})
+    response = client.post("/api/word-to-pdf", files={"file": ("doc.docx", b"PK fake")})
 
     assert response.status_code == 200
     scripting = "/org.openoffice.Office.Common/Security/Scripting"
@@ -428,7 +428,10 @@ def test_output_names_are_capped(client):
 # --- 6/7. Container hardening in docker-compose.yml -------------------------------------------
 
 def test_compose_hardening():
-    compose = (BASE_DIR / "docker-compose.yml").read_text(encoding="utf-8")
+    compose_file = BASE_DIR / "docker-compose.yml"
+    if not compose_file.exists():
+        pytest.skip("docker-compose.yml is not in the image (tests run inside Docker)")
+    compose = compose_file.read_text(encoding="utf-8")
     for line in ("init: true", "cap_drop:", "- ALL", '"no-new-privileges:true"', "pids_limit: 512"):
         assert line in compose
     assert "read_only" not in compose
