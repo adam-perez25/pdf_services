@@ -17,14 +17,23 @@ Planned work for PDFService, ordered by priority. Each item is one branch.
 | Page numbers and watermark | `feature/stamp-pdf` | M | Stamp page numbers or a text watermark (position, size, opacity) on every page. |
 | Edit metadata | `feature/pdf-metadata` | S-M | View and edit title, author, subject, keywords; option to remove all metadata. |
 
-## Phase 3: Big features (after phases 1-2)
+## Large PDFs (done, `feature/large-pdfs`)
 
-| Item | Effort | Notes |
+Limits and timeouts configurable via env vars (500 MB per file / 1 GB per request by default, compression timeout scaled per page), results streamed from disk instead of memory, sweeper skips in-flight job files, `mem_limit` 3g. Tested with 1500-page PDFs.
+
+## Phase 3: Big features (done)
+
+| Item | Branch | Notes |
 |---|---|---|
-| OCR for scanned PDFs | L | `ocrmypdf` + Tesseract (Spanish) in the Dockerfile; ~200 MB+ image growth; slow, needs temp files, BackgroundTask cleanup and a timeout. |
-| Chain tools | L | e.g. merge, then compress, then download in one flow, reusing organizer document ids. |
-| Sign a PDF | L | Draw or upload a signature and place it on a page, building on the organizer preview UI. |
-| Extract text (PDF to TXT) | S-M | Only if needed; returns nothing for scans until OCR exists. |
+| OCR for scanned PDFs | `feature/ocr-pdf` | `/ocr`: ocrmypdf + Tesseract (spa, eng) in the Docker image (+~170 MB); private scratch dir per job, timeout per page, page cap and timeouts configurable. |
+| Chain tools | `feature/chain-tools` | `/workflow`, client-side: `static/workflow.js` calls the existing `/api` endpoints in sequence (OCR, numbers, watermark, metadata, compress, protect). New tools are one entry in `STEP_DEFINITIONS`. |
+| Sign a PDF | `feature/sign-pdf` | `/sign`: draw or upload a signature, place it on any pages (visual signature, not a digital one). |
+| Extract text (PDF to TXT) | `feature/extract-text` | `/extract-text`: page ranges, separators, preview; points to OCR when the PDF has no text. |
+
+## Ideas for later
+
+- Limit concurrent heavy jobs (two 500 MB jobs at once can exceed the 3 GB memory limit).
+- Guard PDF to images at 300 dpi on 1000+ pages (time and temp disk).
 
 ## Not planned
 

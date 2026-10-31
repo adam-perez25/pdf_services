@@ -2,7 +2,8 @@
 
 Aplicación web para trabajar con documentos desde el navegador. Permite unir y
 dividir archivos PDF, organizar sus páginas, comprimirlos, convertir imágenes
-a PDF, exportar las páginas de un PDF como imágenes y transformar documentos
+a PDF, exportar las páginas de un PDF como imágenes, hacer buscables los PDF
+escaneados (OCR) y transformar documentos
 Word, hojas de cálculo Excel y presentaciones PowerPoint en PDF.
 
 La aplicación está construida con [FastAPI](https://fastapi.tiangolo.com/),
@@ -50,11 +51,36 @@ mismo servidor y no requiere un frontend independiente.
   palabras clave de un PDF, o elimina todos sus metadatos (incluido el bloque
   XMP) antes de compartirlo, para no revelar quién lo creó, con qué programa ni
   cuándo.
+- **OCR (hacer buscable un PDF escaneado):** reconoce el texto de las páginas
+  escaneadas con [OCRmyPDF](https://ocrmypdf.readthedocs.io/) y Tesseract y lo
+  añade como una capa invisible, para poder buscar, seleccionar y copiar el
+  texto sin cambiar el aspecto del documento. Idiomas: español (por defecto),
+  inglés o ambos. Las páginas que ya tienen texto se dejan como están. Tarda
+  varios segundos por página.
+- **Extraer texto:** descarga el texto de un PDF como archivo `.txt` (UTF-8), de
+  todas las páginas o de un rango (`1-3, 5`), con un encabezado
+  `--- Página N ---`, un salto de página o nada entre páginas, y muestra una
+  vista previa con el número de caracteres y páginas. Los PDF escaneados no
+  tienen texto: hay que pasarlos antes por OCR.
 - **Organizar páginas:** muestra una vista previa de cada página y permite
   girarlas, eliminarlas y reordenarlas (con los botones o arrastrándolas, también
   en pantallas táctiles manteniendo pulsada la página) antes de descargar el PDF
   resultante.
   Al pulsar una página se abre una vista ampliada en alta resolución.
+- **Flujo de trabajo:** encadena varias herramientas de una sola vez (por
+  ejemplo unir, numerar páginas, borrar metadatos, comprimir y proteger) y
+  descarga solo el resultado final. Si se eligen varios PDFs, el primer paso es
+  siempre unirlos; «Proteger con contraseña» va siempre al final. El navegador
+  llama uno tras otro a los mismos endpoints de la API, así que cada paso
+  aplica sus propias validaciones y límites; si un paso falla, se muestra su
+  error y se puede descargar el resultado del último paso correcto.
+- **Firmar PDF:** dibuja tu firma con el ratón o el dedo (tinta negra o azul)
+  o sube una imagen PNG (admite fondo transparente) o JPEG, y colócala sobre
+  la vista previa de las páginas que quieras: se arrastra, se cambia de tamaño
+  sin deformarla y también se mueve con las flechas del teclado. Es una firma
+  **visual** (una imagen sobre la página), no una firma digital certificada:
+  no acredita la identidad de quien firma ni protege el documento frente a
+  cambios. Funciona aunque las páginas estén giradas.
 
 Los archivos se procesan durante la solicitud y se devuelven como descargas.
 La aplicación no incluye almacenamiento permanente de documentos.
@@ -67,7 +93,9 @@ Para ejecutar el proyecto directamente:
 - LibreOffice (Writer, Calc e Impress) instalado y disponible en el `PATH`
   para usar las conversiones de Word, Excel y PowerPoint.
 - Ghostscript instalado y disponible en el `PATH` (`gs`, o `gswin64c` en
-  Windows) para usar la compresión.
+  Windows) para usar la compresión y el OCR.
+- OCRmyPDF (incluido en `requirements.txt`) y Tesseract con los idiomas
+  español e inglés (`tesseract` en el `PATH`) para usar el OCR.
 
 Para ejecutarlo con Docker:
 
@@ -78,7 +106,7 @@ Para ejecutarlo con Docker:
 ## Ejecución con Docker
 
 Docker Compose es la forma recomendada de ejecutar la aplicación porque
-instala también LibreOffice, Ghostscript y evita configurar las dependencias del sistema
+instala también LibreOffice, Ghostscript, Tesseract y evita configurar las dependencias del sistema
 manualmente.
 
 1. Clona el repositorio y entra en su directorio:
@@ -103,8 +131,10 @@ docker compose down
 ```
 
 La imagen se basa en `python:3.12-slim`, instala LibreOffice (Writer, Calc e
-Impress), las fuentes Liberation y Ghostscript, y ejecuta el servicio con un
-usuario sin privilegios (`app`, UID `10001`) en lugar de `root`.
+Impress), las fuentes Liberation, Ghostscript y Tesseract (con los idiomas
+español e inglés, para el OCR), y ejecuta el servicio con un usuario sin
+privilegios (`app`, UID `10001`) en lugar de `root`. Tesseract y OCRmyPDF
+añaden unos 170 MB a la imagen (de unos 1,1 GB a unos 1,27 GB en disco).
 
 El contenedor expone el puerto `8000`. Si ese puerto ya está ocupado, cambia
 el mapeo en `docker-compose.yml`; por ejemplo, `8080:8000` permite acceder a
@@ -116,6 +146,10 @@ También es posible construir y ejecutar la imagen sin Compose:
 docker build -t pdf-toolkit .
 docker run --rm --name pdf-toolkit-web -p 8000:8000 pdf-toolkit
 ```
+
+Sin Compose, los límites se pasan con `-e` (por ejemplo
+`-e MAX_UPLOAD_MB=800 -e MAX_TOTAL_UPLOAD_MB=1500`) y la memoria con
+`--memory=3g`; ver [Configuración](#configuración).
 
 La imagen incluye un `HEALTHCHECK` que consulta `/health` cada 30 segundos.
 `docker compose ps` muestra el contenedor como `healthy` cuando el servicio
@@ -165,35 +199,70 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 Cuando se ejecute fuera de Docker, LibreOffice debe estar instalado por
 separado para que funcionen **Word a PDF**, **Excel a PDF** y **PowerPoint a
 PDF** (se busca el ejecutable `soffice`), y Ghostscript para **Comprimir PDF**
-(`gs`, `gswin64c` o `gswin32c`). Si alguno no está disponible, esas
+(`gs`, `gswin64c` o `gswin32c`), y Tesseract para el **OCR** (`tesseract`,
+además del paquete `ocrmypdf` de `requirements.txt`). Si alguno no está disponible, esas
 operaciones responderán con un error y las demás herramientas seguirán
 disponibles. `GET /health` indica cuáles se han detectado.
 
 ## Configuración
 
-La aplicación no usa variables de entorno ni archivo `.env`: no necesita
-ninguna configuración para arrancar. Los valores principales están definidos
-como constantes en `app/main.py`:
+La aplicación no necesita ninguna configuración para arrancar. Los límites
+principales se pueden cambiar con variables de entorno (en Docker, en la
+sección `environment:` de `docker-compose.yml`, donde ya aparecen con sus
+valores por defecto; tras editarlos basta con `docker compose up -d`). Se leen
+una vez al arrancar: si una variable no es un número entero o está fuera de
+rango, el servicio no arranca y el registro (`docker compose logs`) indica qué
+variable falla.
+
+| Variable de entorno | Por defecto | Rango | Descripción |
+| --- | --- | --- | --- |
+| `MAX_UPLOAD_MB` | 500 MB | 1-100000 | Tamaño máximo de cada archivo subido; si se supera responde `413`. |
+| `MAX_TOTAL_UPLOAD_MB` | 1000 MB | 1-100000 | Tamaño máximo de todos los archivos de una petición (**Unir PDF**, **Imágenes a PDF**); si se supera responde `413`. No puede ser menor que `MAX_UPLOAD_MB`; si no se indica, vale 1000 o `MAX_UPLOAD_MB` si este es mayor. |
+| `OFFICE_TIMEOUT_SECONDS` | 300 s | 10-86400 | Tiempo máximo de una conversión con LibreOffice; si se supera responde `504`. |
+| `COMPRESSION_TIMEOUT_SECONDS` | 600 s | 10-86400 | Tiempo base de la compresión con Ghostscript. |
+| `COMPRESSION_SECONDS_PER_PAGE` | 2 s | 0-600 | Tiempo extra por página: el límite es base + páginas × este valor (20 páginas: 640 s; 1000 páginas: 2600 s). Si se supera responde `504`. |
+| `COMPRESSION_MAX_TIMEOUT_SECONDS` | 3600 s | 10-604800 | Tope del tiempo de compresión (nunca menor que el tiempo base). |
+| `OCR_MAX_PAGES` | 2000 | 1-100000 | Número máximo de páginas de un PDF para el OCR; si se supera responde `400`. |
+| `OCR_TIMEOUT_SECONDS` | 60 s | 10-86400 | Tiempo base del OCR. |
+| `OCR_SECONDS_PER_PAGE` | 20 s | 0-3600 | Tiempo extra del OCR por cada página. |
+| `OCR_MAX_TIMEOUT_SECONDS` | 14400 s | 10-604800 | Tope del tiempo del OCR (4 horas); si se supera responde `504`. |
+| `DOCUMENT_TTL_SECONDS` | 1800 s (30 min) | 60-604800 | Tiempo sin uso tras el que se borran los documentos de **Organizar páginas** y los archivos temporales que hayan quedado. |
+| `DOCUMENT_SWEEP_SECONDS` | 300 s (5 min) | 10-86400 | Frecuencia de esa limpieza. |
+
+Con los valores por defecto se pueden procesar PDF de más de 1000 páginas y
+varios cientos de MB. Como referencia, con un PDF de 200 MB y 1000 páginas
+(medido en un PC de sobremesa) unir dos copias tarda unos 9 s y usa unos
+500 MB de memoria; dividir, organizar, numerar o editar metadatos, 3-5 s y
+unos 300 MB; protegerlo, unos 650 MB; comprimirlo, unos 20 s. Los resultados
+se escriben en archivos temporales y se envían desde el disco, así que el
+disco temporal del contenedor necesita espacio para la subida y el resultado.
+Si subes `MAX_UPLOAD_MB`, sube también `mem_limit` en `docker-compose.yml`
+(3 GB por defecto): las operaciones más pesadas usan unas 2-3 veces el tamaño
+del archivo en memoria.
+
+Otros valores fijos, definidos como constantes en `app/main.py`:
 
 | Constante | Valor | Descripción |
 | --- | --- | --- |
-| `DOCUMENT_TTL_SECONDS` | 30 min | Tiempo sin uso tras el que se borra un documento de **Organizar páginas**. |
-| `DOCUMENT_SWEEP_SECONDS` | 5 min | Frecuencia de la limpieza de documentos caducados. |
-| `OFFICE_TIMEOUT_SECONDS` | 120 s | Tiempo máximo de una conversión con LibreOffice; si se supera responde `504`. |
-| `COMPRESSION_TIMEOUT_SECONDS` | 600 s | Tiempo máximo de la compresión con Ghostscript; si se supera responde `504`. |
-| `MAX_IMAGE_PIXELS` | 40 000 000 | Límite de píxeles por imagen en **PDF a imágenes**. |
-| `MAX_UPLOAD_MB` | 50 MB | Tamaño máximo de cada archivo subido; si se supera responde `413`. |
-| `MAX_TOTAL_UPLOAD_MB` | 200 MB | Tamaño máximo de todos los archivos de una petición (**Unir PDF**, **Imágenes a PDF**); si se supera responde `413`. |
 | `MULTIPART_OVERHEAD_MB` | 1 MB | Margen para los separadores y campos del formulario. Una petición mayor que `MAX_TOTAL_UPLOAD_MB` + este margen se rechaza con `413` antes de guardarse en disco (por su `Content-Length`, o en cuanto lo supera si no lo indica). |
+| `MAX_IMAGE_PIXELS` | 40 000 000 | Límite de píxeles por imagen en **PDF a imágenes**. |
 | `STAMP_NUMBER_SIZE_RANGE` | 6-72 pt | Tamaños de letra admitidos para los números de página. |
 | `STAMP_WATERMARK_SIZE_RANGE` | 8-200 pt | Tamaños de letra admitidos para la marca de agua (se reduce si el texto no cabe). |
 | `STAMP_WATERMARK_MAX_LENGTH` | 100 | Longitud máxima del texto de la marca de agua. |
 | `STAMP_MAX_START_NUMBER` | 100 000 | Número inicial máximo de la numeración. |
 | `STAMP_MARGIN` | 28 pt | Distancia de los números de página al borde. |
 | `MAX_METADATA_LENGTH` | 500 | Longitud máxima de cada campo en **Editar metadatos**. |
+| `SIGNATURE_MAX_MB` | 10 MB | Tamaño máximo de la imagen de la firma; si se supera responde `413`. |
+| `SIGNATURE_MAX_SOURCE_PIXELS` | 40 000 000 | Píxeles máximos de la imagen de la firma subida. |
+| `SIGNATURE_MAX_SIDE` | 2000 px | La firma se reduce a este lado máximo antes de incrustarla en el PDF. |
+| `SIGNATURE_MAX_PLACEMENTS` | 200 | Número máximo de firmas colocadas en una petición. |
+| `OCR_LANGUAGES` | `spa`, `eng`, `spa+eng` | Idiomas admitidos por el OCR. |
+| `OCR_JOBS` | 2 | Páginas que Tesseract procesa a la vez en cada petición de OCR. |
 
-Si una conversión o compresión supera su tiempo máximo, se termina el proceso
-externo junto con todos los procesos que haya iniciado.
+Si una conversión, compresión u OCR supera su tiempo máximo, se termina el proceso
+externo junto con todos los procesos que haya iniciado. La limpieza periódica
+nunca borra los archivos de un trabajo que sigue en curso, aunque tarde más
+que `DOCUMENT_TTL_SECONDS` (por ejemplo, comprimir un PDF enorme).
 
 El puerto se elige al arrancar `uvicorn` (`--port`) o en el mapeo de puertos
 de Docker.
@@ -201,8 +270,9 @@ de Docker.
 ## Interfaz web
 
 Cada herramienta tiene su propia página: `/` (inicio), `/merge`, `/split`,
-`/pages`, `/compress`, `/metadata`, `/protect`, `/images`, `/pdf-to-images`, `/stamp`, `/word`,
-`/excel` y `/powerpoint`.
+`/pages`, `/compress`, `/metadata`, `/extract-text`, `/protect`, `/images`, `/pdf-to-images`, `/stamp`, `/ocr`, `/sign`, `/word`,
+`/excel`, `/powerpoint` y `/workflow` (flujo de trabajo, que no tiene endpoint
+propio: encadena los de las demás herramientas desde el navegador).
 
 La interfaz tiene modo oscuro automático: sigue la preferencia de tema claro u
 oscuro del sistema operativo, sin necesidad de configurar nada.
@@ -213,7 +283,7 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 
 | Método | Ruta | Descripción |
 | --- | --- | --- |
-| `GET` | `/health` | Estado del servicio: `storage` (puede guardar archivos temporales), `libreoffice` (conversiones de Office disponibles) y `ghostscript` (compresión disponible). Responde `503` si no puede guardar archivos. |
+| `GET` | `/health` | Estado del servicio: `storage` (puede guardar archivos temporales), `libreoffice` (conversiones de Office disponibles) y `ghostscript` (compresión disponible) y `ocr` (OCRmyPDF y Tesseract disponibles). Responde `503` si no puede guardar archivos. |
 | `POST` | `/api/merge` | Une varios PDF recibidos como `files`. |
 | `POST` | `/api/pdf-info` | Devuelve el número de páginas de un PDF. |
 | `POST` | `/api/split` | Extrae un rango mediante `start_page` y `end_page`. |
@@ -229,16 +299,19 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 | `POST` | `/api/stamp` | Numera las páginas (`mode=numbers`, por defecto) o añade una marca de agua (`mode=watermark`). Números: `position` (`bottom-center` por defecto, `bottom-left`, `bottom-right`, `top-center`, `top-left`, `top-right`), `number_format` (`n` → `1`, `n-of-total` → `1 / N`, `page-n-of-total` → `Página 1 de N`; N es el último número), `start_number` (0-100000, por defecto 1) y `font_size` (6-72, por defecto 12). Marca de agua: `text` (obligatorio, hasta 100 caracteres), `font_size` (8-200, por defecto 60), `opacity` (0.1-1, por defecto 0.3) y `rotation` (`45` por defecto o `0`). `output_name` es opcional (`<nombre>-numerado.pdf` / `<nombre>-marca-de-agua.pdf`). |
 | `POST` | `/api/metadata/read` | Devuelve en JSON los metadatos de un PDF (`title`, `author`, `subject`, `keywords`, `creator`, `producer`, `creation_date`, `modification_date`; `null` si faltan) y su número de páginas (`pages`). |
 | `POST` | `/api/metadata` | Escribe `title`, `author`, `subject` y `keywords` (máximo 500 caracteres cada uno; un campo vacío o ausente se elimina), quita el bloque XMP y borra las entradas no estándar que añaden otros programas (se conservan creador, productor, fechas y `/Trapped`). Con `remove_all=true` elimina todos los metadatos. La descarga se llama `<nombre>-metadatos.pdf` salvo que se indique `output_name`. |
+| `POST` | `/api/ocr` | Hace buscable un PDF escaneado con OCRmyPDF y Tesseract; `language` es `spa` (por defecto), `eng` o `spa+eng`. Las páginas que ya tienen texto se conservan. La descarga se llama `<nombre>-ocr.pdf` salvo que se indique `output_name`. Máximo `OCR_MAX_PAGES` páginas (2000 por defecto). |
+| `POST` | `/api/extract-text` | Extrae el texto de un PDF y lo devuelve como `text/plain; charset=utf-8` (`<nombre>.txt`, o `output_name` con extensión `.txt`). `pages` admite rangos (`1-3, 5`; vacío = todas), `page_separator` es `header` (por defecto, línea `--- Página N ---`), `formfeed` o `none`. Las cabeceras `X-Page-Count` y `X-Character-Count` indican páginas y caracteres extraídos. Responde `400` si el PDF no contiene texto (probablemente escaneado; usar OCR antes). |
 | `POST` | `/api/documents` | Sube un PDF una sola vez y devuelve su `id` y número de páginas. |
 | `GET` | `/api/documents/{id}/pages/{n}` | Devuelve la página `n` como JPEG; `width` controla el tamaño (100-2000 px). |
 | `POST` | `/api/documents/{id}/edit` | Genera el PDF editado a partir de `pages` sin volver a subir el archivo. |
+| `POST` | `/api/documents/{id}/sign` | Firma el documento subido sin volver a enviarlo: `signature` es la imagen de la firma (PNG o JPEG; la transparencia del PNG se conserva) y `placements` una lista JSON como `[{"page": 1, "x": 0.6, "y": 0.8, "width": 0.3, "height": 0.08}]`, con la caja en fracciones (0-1) de la página tal como se ve (origen arriba a la izquierda, ya girada). Admite hasta 200 cajas que deben quedar dentro de la página. Devuelve `firmado.pdf` salvo que se indique `output_name`; después se borra el documento subido, como en `/edit`. |
 | `DELETE` | `/api/documents/{id}` | Elimina el documento subido. |
 | `POST` | `/api/edit-pages` | Genera un PDF a partir de `pages`, una lista JSON como `[{"page": 3, "rotation": 90}]`; las páginas omitidas se eliminan. |
 
 Los documentos subidos a `/api/documents` se guardan en una carpeta temporal
-del contenedor y se eliminan en cuanto se descarga el PDF editado, al cerrar
-la página, tras 30 minutos sin uso (se comprueba cada 5 minutos) y al iniciar
-el servidor. Si se sigue editando después de descargar, la página vuelve a
+del contenedor y se eliminan en cuanto se descarga el PDF editado o firmado, al cerrar
+la página, tras 30 minutos sin uso (se comprueba cada 5 minutos; ambos
+valores son configurables) y al iniciar el servidor. Si se sigue editando después de descargar, la página vuelve a
 subir el archivo automáticamente.
 
 Los endpoints que generan archivos aceptan el campo opcional `output_name`
@@ -253,8 +326,9 @@ Los errores devuelven un JSON con `detail` en español:
   cliente: queda en el registro del servidor (`docker compose logs`).
 - `413`: un archivo supera `MAX_UPLOAD_MB` o el conjunto supera
   `MAX_TOTAL_UPLOAD_MB`.
-- `503`: falta LibreOffice o Ghostscript. `504`: la conversión tardó demasiado.
-- `410`: el documento de **Organizar páginas** ha caducado.
+- `503`: falta LibreOffice, Ghostscript, OCRmyPDF o Tesseract (o un idioma
+  de Tesseract). `504`: la conversión, la compresión o el OCR tardó demasiado.
+- `410`: el documento de **Organizar páginas** o **Firmar PDF** ha caducado.
 
 La documentación interactiva generada por FastAPI está disponible en
 [`/docs`](http://localhost:8000/docs) cuando el servidor está en ejecución.
@@ -276,8 +350,8 @@ FastAPI) y `openpyxl` y `python-pptx`, que se usan para generar los archivos
 de Excel y PowerPoint de las pruebas. La configuración de pytest está en
 `pytest.ini`.
 
-Las pruebas de conversión de Office y de compresión se omiten automáticamente si
-LibreOffice o Ghostscript no están instalados. Las pruebas no forman parte de la imagen de Docker.
+Las pruebas de conversión de Office, de compresión y de OCR se omiten
+automáticamente si LibreOffice, Ghostscript o Tesseract no están instalados. Las pruebas no forman parte de la imagen de Docker.
 
 ## Estructura del proyecto
 
@@ -311,8 +385,9 @@ permite recursos del propio servidor, `X-Content-Type-Options: nosniff`,
 `X-Frame-Options: DENY` y `Referrer-Policy: no-referrer`). Los archivos de
 `/static` se sirven con `Cache-Control: no-cache` para que el navegador
 compruebe si hay una versión nueva tras reconstruir la imagen. Las subidas
-tienen un tamaño máximo (`MAX_UPLOAD_MB` y `MAX_TOTAL_UPLOAD_MB`) y
-`docker-compose.yml` limita la memoria del contenedor a 1 GB (`mem_limit`).
+tienen un tamaño máximo (`MAX_UPLOAD_MB` y `MAX_TOTAL_UPLOAD_MB`, 500 MB y
+1 GB por defecto) y `docker-compose.yml` limita la memoria del contenedor a
+3 GB (`mem_limit`).
 
 La interfaz no carga recursos externos: las fuentes Manrope y DM Mono se
 sirven desde `static/fonts/`, distribuidas bajo la SIL Open Font License, por

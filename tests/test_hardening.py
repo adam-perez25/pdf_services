@@ -44,6 +44,8 @@ BIG_PDF = make_pdf(1) + b"%" + b"x" * 20_000
         ("/api/stamp", {}),
         ("/api/metadata/read", {}),
         ("/api/metadata", {}),
+        ("/api/extract-text", {}),
+        ("/api/ocr", {}),
     ],
 )
 def test_single_pdf_endpoints_reject_too_big_files(client, small_limits, url, data):
@@ -134,6 +136,7 @@ def test_errors_do_not_leak_exception_text(client, monkeypatch, caplog):
         ("/api/stamp", {}),
         ("/api/metadata/read", {}),
         ("/api/metadata", {}),
+        ("/api/extract-text", {}),
     ],
 )
 def test_corrupt_pdf_error_is_generic(client, url, data):
@@ -156,6 +159,7 @@ def test_corrupt_pdf_error_is_generic(client, url, data):
         ("/api/stamp", {}),
         ("/api/metadata/read", {}),
         ("/api/metadata", {}),
+        ("/api/extract-text", {}),
     ],
 )
 def test_encrypted_pdf_is_rejected(client, documents_dir, url, data):

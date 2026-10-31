@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
+import importlib.util
 from io import BytesIO
 import json
 import logging
@@ -10,6 +11,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -27,19 +29,48 @@ from pypdf.generic import DecodedStreamObject, DictionaryObject, FloatObject, Na
 from starlette.background import BackgroundTask
 
 
+def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    """Read a whole-number setting from the environment, or use the default.
+
+    A value that is not a number or is out of range stops the service at
+    startup with a clear message, instead of quietly running with a limit
+    nobody chose. The result is stored in a module constant and read at call
+    time, so tests can still monkeypatch the constant.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(f"La variable de entorno {name}={raw!r} no es un número entero.") from None
+    if not minimum <= value <= maximum:
+        raise ValueError(
+            f"La variable de entorno {name}={raw!r} debe estar entre {minimum} y {maximum}."
+        )
+    return value
+
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 DOCUMENTS_DIR = Path(tempfile.gettempdir()) / "pdf-toolkit-documents"
 DOCUMENTS_DIR.mkdir(exist_ok=True)
-DOCUMENT_TTL_SECONDS = 30 * 60
-DOCUMENT_SWEEP_SECONDS = 5 * 60
+DOCUMENT_TTL_SECONDS = env_int("DOCUMENT_TTL_SECONDS", 30 * 60, 60, 7 * 24 * 3600)
+DOCUMENT_SWEEP_SECONDS = env_int("DOCUMENT_SWEEP_SECONDS", 5 * 60, 10, 24 * 3600)
 DOCUMENT_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
 PDFIUM_LOCK = threading.Lock()
 THUMBNAIL_WIDTH = 300
 MIN_RENDER_WIDTH = 100
 MAX_RENDER_WIDTH = 2000
 # Upload limits: per file, and for all the files of one request (merge, images).
-MAX_UPLOAD_MB = 50
-MAX_TOTAL_UPLOAD_MB = 200
+# They stop accidents and abuse, not big documents: a 1000-page scan is
+# usually a few hundred MB.
+MAX_UPLOAD_MB = env_int("MAX_UPLOAD_MB", 500, 1, 100_000)
+# Unset, the total follows a raised per-file limit instead of stopping startup.
+MAX_TOTAL_UPLOAD_MB = env_int("MAX_TOTAL_UPLOAD_MB", max(1000, MAX_UPLOAD_MB), 1, 100_000)
+if MAX_TOTAL_UPLOAD_MB < MAX_UPLOAD_MB:
+    raise ValueError(
+        f"MAX_TOTAL_UPLOAD_MB ({MAX_TOTAL_UPLOAD_MB}) no puede ser menor que MAX_UPLOAD_MB ({MAX_UPLOAD_MB})."
+    )
 # Extra room in a request for the multipart boundaries and the text fields.
 MULTIPART_OVERHEAD_MB = 1
 logger = logging.getLogger("uvicorn.error")
@@ -220,6 +251,7 @@ def health():
             "storage": storage_ok,
             "libreoffice": find_soffice() is not None,
             "ghostscript": find_ghostscript() is not None,
+            "ocr": ocr_available(),
         },
     )
 
@@ -232,7 +264,7 @@ def find_ghostscript() -> str | None:
     return shutil.which("gs") or shutil.which("gswin64c") or shutil.which("gswin32c")
 
 
-def run_tool(command: list[str], timeout: float) -> subprocess.CompletedProcess:
+def run_tool(command: list[str], timeout: float, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     """Run an external tool, and on timeout kill it with every process it started.
 
     soffice is only a launcher: the conversion runs in a soffice.bin child, which
@@ -245,6 +277,7 @@ def run_tool(command: list[str], timeout: float) -> subprocess.CompletedProcess:
         stderr=subprocess.PIPE,
         text=True,
         start_new_session=os.name == "posix",
+        env=env,
     )
     try:
         stdout, stderr = process.communicate(timeout=timeout)
@@ -352,6 +385,63 @@ def open_pdfium_checked(path: Path) -> pypdfium2.PdfDocument:
         raise
 
 
+# Work files of requests that are still being processed (a long compression,
+# a big ZIP). The sweeper skips them, so a job that runs longer than
+# DOCUMENT_TTL_SECONDS does not lose its files halfway.
+ACTIVE_JOB_FILES: set[Path] = set()
+ACTIVE_JOB_LOCK = threading.Lock()
+
+
+@contextmanager
+def protect_from_sweeper(*paths: Path):
+    with ACTIVE_JOB_LOCK:
+        ACTIVE_JOB_FILES.update(paths)
+    try:
+        yield
+    finally:
+        with ACTIVE_JOB_LOCK:
+            ACTIVE_JOB_FILES.difference_update(paths)
+        # The download starts right after; a fresh mtime gives it a full TTL
+        # before the sweeper may remove a file whose cleanup never ran.
+        for path in paths:
+            try:
+                os.utime(path)
+            except FileNotFoundError:
+                pass
+
+
+def new_job_paths(*suffixes: str) -> list[Path]:
+    DOCUMENTS_DIR.mkdir(exist_ok=True)
+    job_id = uuid.uuid4().hex
+    return [DOCUMENTS_DIR / f"{job_id}{suffix}" for suffix in suffixes]
+
+
+def write_pdf_to_file(writer: PdfWriter) -> Path:
+    """Write a result PDF to a work file instead of memory.
+
+    Kept in memory, a big result would exist two or three times at once (the
+    buffer, its copy and the response body); on disk it is streamed out.
+    """
+    (path,) = new_job_paths(".out.pdf")
+    try:
+        with protect_from_sweeper(path), path.open("wb") as destination:
+            writer.write(destination)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+    return path
+
+
+def file_download(path: Path, filename: str, media_type: str = "application/pdf") -> FileResponse:
+    """Send a work file as an attachment and delete it once it has been sent."""
+    return FileResponse(
+        path,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        background=BackgroundTask(path.unlink, missing_ok=True),
+    )
+
+
 # The file-processing endpoints are plain functions, not async: FastAPI runs
 # them in a worker thread, so a long merge or conversion does not freeze the
 # server for everyone else.
@@ -374,10 +464,8 @@ def merge_pdfs(
                 )
             writer.append(open_pdf_reader(file.file))
 
-        output = BytesIO()
-        writer.write(output)
+        output_path = write_pdf_to_file(writer)
         writer.close()
-        output.seek(0)
     except HTTPException:
         writer.close()
         raise
@@ -388,14 +476,7 @@ def merge_pdfs(
         for file in files:
             file.file.close()
 
-    filename = clean_output_name(output_name)
-    return Response(
-        content=output.getvalue(),
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-        },
-    )
+    return file_download(output_path, clean_output_name(output_name))
 
 
 @app.post("/api/pdf-info")
@@ -440,10 +521,8 @@ def split_pdf(
         for page_index in range(start_page - 1, end_page):
             writer.add_page(reader.pages[page_index])
 
-        output = BytesIO()
-        writer.write(output)
+        output_path = write_pdf_to_file(writer)
         writer.close()
-        output.seek(0)
     except Exception as error:
         if isinstance(error, HTTPException):
             raise
@@ -451,13 +530,7 @@ def split_pdf(
     finally:
         file.file.close()
 
-    return Response(
-        content=output.getvalue(),
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="{clean_output_name(output_name)}"',
-        },
-    )
+    return file_download(output_path, clean_output_name(output_name))
 
 
 def parse_page_ranges(value: str, page_count: int) -> list[tuple[int, int]]:
@@ -533,32 +606,35 @@ def split_pdf_zip(
             part_names = unique_pdf_names(given_names[:len(parts)])
             zip_name = f"{Path(file.filename).stem}-split.zip"
 
-        def build_part(start: int, end: int) -> bytes:
+        def build_part(start: int, end: int) -> Path:
+            # Each part goes through a work file, so a big range is never held
+            # in memory as a whole.
             writer = PdfWriter()
-            for page_index in range(start - 1, end):
-                writer.add_page(reader.pages[page_index])
-            output = BytesIO()
-            writer.write(output)
-            writer.close()
-            return output.getvalue()
+            try:
+                for page_index in range(start - 1, end):
+                    writer.add_page(reader.pages[page_index])
+                return write_pdf_to_file(writer)
+            finally:
+                writer.close()
 
         if len(parts) == 1:
-            return Response(
-                content=build_part(*parts[0]),
-                media_type="application/pdf",
-                headers={"Content-Disposition": f'attachment; filename="{part_names[0]}"'},
-            )
+            return file_download(build_part(*parts[0]), part_names[0])
 
         # The ZIP goes to the documents folder, so it is removed once sent and,
         # if the download is interrupted, by the regular sweep. PDF content is
         # already compressed, so the parts are stored as they are: compressing
         # them again costs a lot of time and saves almost nothing.
-        DOCUMENTS_DIR.mkdir(exist_ok=True)
-        zip_path = DOCUMENTS_DIR / f"{uuid.uuid4().hex}.zip"
+        (zip_path,) = new_job_paths(".zip")
         try:
-            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as archive:
+            with protect_from_sweeper(zip_path), zipfile.ZipFile(
+                zip_path, "w", compression=zipfile.ZIP_STORED
+            ) as archive:
                 for (start, end), part_name in zip(parts, part_names):
-                    archive.writestr(part_name, build_part(start, end))
+                    part_path = build_part(start, end)
+                    try:
+                        archive.write(part_path, part_name)
+                    finally:
+                        part_path.unlink(missing_ok=True)
         except BaseException:
             zip_path.unlink(missing_ok=True)
             raise
@@ -611,14 +687,21 @@ def open_pdfium_document(path: Path) -> pypdfium2.PdfDocument:
         raise
 
 
-def remove_expired_documents(max_age: float = DOCUMENT_TTL_SECONDS) -> None:
-    limit = time.time() - max_age
+def remove_expired_documents(max_age: float | None = None) -> None:
+    # Read at call time, so the configured (or monkeypatched) TTL applies.
+    limit = time.time() - (DOCUMENT_TTL_SECONDS if max_age is None else max_age)
     for path in DOCUMENTS_DIR.iterdir():
-        try:
-            if path.stat().st_mtime < limit:
-                path.unlink()
-        except FileNotFoundError:
-            pass
+        # Holding the lock keeps a job from registering a file between the
+        # check and the unlink.
+        with ACTIVE_JOB_LOCK:
+            if path in ACTIVE_JOB_FILES:
+                continue
+            try:
+                if path.stat().st_mtime < limit:
+                    path.unlink()
+            except OSError:
+                # Already gone, or (on Windows) still open by a request.
+                pass
 
 
 def sweep_documents_forever() -> None:
@@ -637,6 +720,16 @@ def start_document_sweeper() -> None:
 
 
 def build_edited_pdf(reader: PdfReader, pages: str) -> bytes:
+    # In-memory variant for small results; the endpoints use
+    # build_edited_writer + write_pdf_to_file so big PDFs stay on disk.
+    writer = build_edited_writer(reader, pages)
+    output = BytesIO()
+    writer.write(output)
+    writer.close()
+    return output.getvalue()
+
+
+def build_edited_writer(reader: PdfReader, pages: str) -> PdfWriter:
     try:
         layout = json.loads(pages)
         if not isinstance(layout, list) or not layout:
@@ -664,11 +757,7 @@ def build_edited_pdf(reader: PdfReader, pages: str) -> bytes:
         page = writer.add_page(reader.pages[page_number - 1])
         if rotation % 360:
             page.rotate(rotation % 360)
-
-    output = BytesIO()
-    writer.write(output)
-    writer.close()
-    return output.getvalue()
+    return writer
 
 
 @app.post("/api/documents")
@@ -739,7 +828,14 @@ def edit_document(
 ):
     path = get_document_path(document_id)
     try:
-        content = build_edited_pdf(open_pdf_reader(path), pages)
+        # An open file, not the path: given a path, pypdf reads the whole
+        # file into memory first.
+        with protect_from_sweeper(path), path.open("rb") as source:
+            writer = build_edited_writer(open_pdf_reader(source), pages)
+            try:
+                output_path = write_pdf_to_file(writer)
+            finally:
+                writer.close()
     except FileNotFoundError:
         raise document_gone() from None
     except HTTPException:
@@ -751,13 +847,7 @@ def edit_document(
     # needed. If the user keeps editing, the page uploads the file again.
     path.unlink(missing_ok=True)
 
-    return Response(
-        content=content,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="{clean_output_name(output_name)}"',
-        },
-    )
+    return file_download(output_path, clean_output_name(output_name))
 
 
 @app.delete("/api/documents/{document_id}", status_code=204)
@@ -778,7 +868,11 @@ def edit_pages(
     check_upload_sizes([file])
 
     try:
-        content = build_edited_pdf(open_pdf_reader(file.file), pages)
+        writer = build_edited_writer(open_pdf_reader(file.file), pages)
+        try:
+            output_path = write_pdf_to_file(writer)
+        finally:
+            writer.close()
     except HTTPException:
         raise
     except Exception as error:
@@ -786,13 +880,7 @@ def edit_pages(
     finally:
         file.file.close()
 
-    return Response(
-        content=content,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="{clean_output_name(output_name)}"',
-        },
-    )
+    return file_download(output_path, clean_output_name(output_name))
 
 
 A4_SHORT_INCHES = 210 / 25.4
@@ -821,44 +909,38 @@ def images_to_pdf(
         raise HTTPException(status_code=400, detail="Selecciona al menos una imagen.")
     check_upload_sizes(images)
 
-    converted_images = []
+    writer = PdfWriter()
     try:
+        # Pillow applies one resolution to every page, so each image becomes
+        # its own one-page PDF at its own dpi and the pages are merged after.
+        # Images are decoded one at a time: a decoded photo takes many times
+        # the memory of its file, so holding them all could exhaust memory.
         for image_file in images:
             try:
                 with Image.open(image_file.file, formats=ALLOWED_IMAGE_FORMATS) as image:
-                    converted_images.append(image.convert("RGB"))
+                    converted = image.convert("RGB")
             except (UnidentifiedImageError, OSError) as error:
                 raise HTTPException(
                     status_code=400,
                     detail=f"El archivo {image_file.filename or 'seleccionado'} no es una imagen válida.",
                 ) from error
-
-        # Pillow applies one resolution to every page, so each image becomes
-        # its own one-page PDF at its own dpi and the pages are merged after.
-        writer = PdfWriter()
-        for image in converted_images:
-            page = BytesIO()
-            image.save(page, format="PDF", resolution=a4_resolution(*image.size))
+            try:
+                page = BytesIO()
+                converted.save(page, format="PDF", resolution=a4_resolution(*converted.size))
+            finally:
+                converted.close()
             writer.append(PdfReader(page))
-        output = BytesIO()
-        writer.write(output)
+        output_path = write_pdf_to_file(writer)
     except HTTPException:
         raise
     except Exception as error:
         raise processing_error("No se pudieron convertir las imágenes.", error) from error
     finally:
-        for image in converted_images:
-            image.close()
+        writer.close()
         for image_file in images:
             image_file.file.close()
 
-    return Response(
-        content=output.getvalue(),
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="{clean_output_name(output_name)}"',
-        },
-    )
+    return file_download(output_path, clean_output_name(output_name))
 
 
 IMAGE_FORMATS = {
@@ -899,44 +981,45 @@ def pdf_to_images(
     # The upload and the ZIP live in the documents folder, so the regular sweep
     # removes them if the server stops halfway; normally they are deleted once
     # the response is sent.
-    DOCUMENTS_DIR.mkdir(exist_ok=True)
-    job_id = uuid.uuid4().hex
-    input_path = DOCUMENTS_DIR / f"{job_id}.in.pdf"
-    zip_path = DOCUMENTS_DIR / f"{job_id}.zip"
+    input_path, zip_path = new_job_paths(".in.pdf", ".zip")
 
     def remove_job_files():
         input_path.unlink(missing_ok=True)
         zip_path.unlink(missing_ok=True)
 
     def render_page_image(document: pypdfium2.PdfDocument, index: int) -> bytes:
-        pdf_page = document[index]
-        try:
-            scale = dpi / 72
-            pixels = pdf_page.get_width() * pdf_page.get_height() * scale * scale
-            if pixels > MAX_IMAGE_PIXELS:
-                scale *= (MAX_IMAGE_PIXELS / pixels) ** 0.5
-            bitmap = pdf_page.render(scale=scale)
-            image = bitmap.to_pil().convert("RGB")
-            output = BytesIO()
-            if pil_format == "JPEG":
-                image.save(output, format="JPEG", quality=90, dpi=(dpi, dpi))
-            else:
-                image.save(output, format="PNG", dpi=(dpi, dpi))
-            image.close()
-            bitmap.close()
-            return output.getvalue()
-        finally:
-            pdf_page.close()
+        # pdfium is not thread-safe, so rendering holds the lock, but only for
+        # one page at a time: the slow image encoding runs outside it, and the
+        # page organizer can still draw thumbnails during a long conversion.
+        with PDFIUM_LOCK:
+            pdf_page = document[index]
+            try:
+                scale = dpi / 72
+                pixels = pdf_page.get_width() * pdf_page.get_height() * scale * scale
+                if pixels > MAX_IMAGE_PIXELS:
+                    scale *= (MAX_IMAGE_PIXELS / pixels) ** 0.5
+                bitmap = pdf_page.render(scale=scale)
+                image = bitmap.to_pil().convert("RGB")
+                bitmap.close()
+            finally:
+                pdf_page.close()
+        output = BytesIO()
+        if pil_format == "JPEG":
+            image.save(output, format="JPEG", quality=90, dpi=(dpi, dpi))
+        else:
+            image.save(output, format="PNG", dpi=(dpi, dpi))
+        image.close()
+        return output.getvalue()
 
     try:
-        with input_path.open("wb") as destination:
-            shutil.copyfileobj(file.file, destination)
+        with protect_from_sweeper(input_path, zip_path):
+            with input_path.open("wb") as destination:
+                shutil.copyfileobj(file.file, destination)
 
-        # pdfium is not thread-safe, so the whole render holds the lock.
-        with PDFIUM_LOCK:
-            document = open_pdfium_checked(input_path)
-            try:
+            with PDFIUM_LOCK:
+                document = open_pdfium_checked(input_path)
                 page_count = len(document)
+            try:
                 digits = max(3, len(str(page_count)))
                 names = [f"{base}-page-{page:0{digits}d}.{image_format}" for page in range(1, page_count + 1)]
 
@@ -949,7 +1032,8 @@ def pdf_to_images(
                         for index, name in enumerate(names):
                             archive.writestr(name, render_page_image(document, index))
             finally:
-                document.close()
+                with PDFIUM_LOCK:
+                    document.close()
     except HTTPException:
         remove_job_files()
         raise
@@ -1000,7 +1084,7 @@ def powerpoint_to_pdf(
     return convert_office_to_pdf(file, output_name, {".ppt", ".pptx"}, "PPT o PPTX")
 
 
-OFFICE_TIMEOUT_SECONDS = 120
+OFFICE_TIMEOUT_SECONDS = env_int("OFFICE_TIMEOUT_SECONDS", 300, 10, 24 * 3600)
 
 
 def convert_office_to_pdf(
@@ -1029,7 +1113,8 @@ def convert_office_to_pdf(
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary_path = Path(temporary_directory)
             input_path = temporary_path / f"source{file_extension}"
-            input_path.write_bytes(file.file.read())
+            with input_path.open("wb") as destination:
+                shutil.copyfileobj(file.file, destination)
             profile_path = temporary_path / "profile"
             result = run_tool(
                 [
@@ -1048,7 +1133,10 @@ def convert_office_to_pdf(
             if result.returncode != 0 or not output_path.exists():
                 detail = result.stderr.strip() or result.stdout.strip()
                 raise RuntimeError(detail or "LibreOffice no pudo convertir el documento.")
-            output = output_path.read_bytes()
+            # Moved out before the temporary folder is deleted, and streamed
+            # from disk instead of read into memory.
+            (result_path,) = new_job_paths(".out.pdf")
+            shutil.move(output_path, result_path)
     except subprocess.TimeoutExpired as error:
         raise HTTPException(status_code=504, detail="La conversión tardó demasiado.") from error
     except Exception as error:
@@ -1056,13 +1144,7 @@ def convert_office_to_pdf(
     finally:
         file.file.close()
 
-    return Response(
-        content=output,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="{clean_output_name(output_name)}"',
-        },
-    )
+    return file_download(result_path, clean_output_name(output_name))
 
 
 
@@ -1072,7 +1154,17 @@ COMPRESSION_LEVELS = {
     "recommended": "/ebook",  # 150 dpi images, good for reading on screen
     "high": "/printer",  # 300 dpi images, good for printing
 }
-COMPRESSION_TIMEOUT_SECONDS = 600
+# Ghostscript's time grows with the page count, so the timeout does too:
+# base + per page, capped. 20 pages get 640 s, 1000 pages 2600 s.
+COMPRESSION_TIMEOUT_SECONDS = env_int("COMPRESSION_TIMEOUT_SECONDS", 600, 10, 24 * 3600)
+COMPRESSION_SECONDS_PER_PAGE = env_int("COMPRESSION_SECONDS_PER_PAGE", 2, 0, 600)
+COMPRESSION_MAX_TIMEOUT_SECONDS = env_int("COMPRESSION_MAX_TIMEOUT_SECONDS", 3600, 10, 7 * 24 * 3600)
+
+
+def compression_timeout(page_count: int) -> float:
+    scaled = COMPRESSION_TIMEOUT_SECONDS + COMPRESSION_SECONDS_PER_PAGE * page_count
+    # The cap never cuts below the base timeout.
+    return min(scaled, max(COMPRESSION_MAX_TIMEOUT_SECONDS, COMPRESSION_TIMEOUT_SECONDS))
 
 
 @app.post("/api/compress")
@@ -1097,44 +1189,45 @@ def compress_pdf(
 
     # Both files live in the documents folder, so the regular sweep removes
     # them if the server stops halfway; normally they are deleted once sent.
-    DOCUMENTS_DIR.mkdir(exist_ok=True)
-    job_id = uuid.uuid4().hex
-    input_path = DOCUMENTS_DIR / f"{job_id}.in.pdf"
-    output_path = DOCUMENTS_DIR / f"{job_id}.out.pdf"
+    input_path, output_path = new_job_paths(".in.pdf", ".out.pdf")
 
     def remove_job_files():
         input_path.unlink(missing_ok=True)
         output_path.unlink(missing_ok=True)
 
     try:
-        with input_path.open("wb") as destination:
-            shutil.copyfileobj(file.file, destination)
-        # Ghostscript "repairs" almost anything without failing, so make sure
-        # this really is a readable PDF first.
-        with PDFIUM_LOCK:
-            open_pdfium_checked(input_path).close()
-        result = run_tool(
-            [
-                ghostscript,
-                "-dSAFER",
-                "-dBATCH",
-                "-dNOPAUSE",
-                "-dQUIET",
-                "-sDEVICE=pdfwrite",
-                "-dCompatibilityLevel=1.5",
-                f"-dPDFSETTINGS={COMPRESSION_LEVELS[level]}",
-                "-dDetectDuplicateImages=true",
-                # Left to choose, Ghostscript sometimes stores grainy scans with
-                # lossless Flate, which can be bigger than the original JPEG.
-                "-dAutoFilterColorImages=false",
-                "-dColorImageFilter=/DCTEncode",
-                "-dAutoFilterGrayImages=false",
-                "-dGrayImageFilter=/DCTEncode",
-                f"-sOutputFile={output_path}",
-                str(input_path),
-            ],
-            timeout=COMPRESSION_TIMEOUT_SECONDS,
-        )
+        # A big PDF can take longer than DOCUMENT_TTL_SECONDS to compress.
+        with protect_from_sweeper(input_path, output_path):
+            with input_path.open("wb") as destination:
+                shutil.copyfileobj(file.file, destination)
+            # Ghostscript "repairs" almost anything without failing, so make sure
+            # this really is a readable PDF first.
+            with PDFIUM_LOCK:
+                document = open_pdfium_checked(input_path)
+                page_count = len(document)
+                document.close()
+            result = run_tool(
+                [
+                    ghostscript,
+                    "-dSAFER",
+                    "-dBATCH",
+                    "-dNOPAUSE",
+                    "-dQUIET",
+                    "-sDEVICE=pdfwrite",
+                    "-dCompatibilityLevel=1.5",
+                    f"-dPDFSETTINGS={COMPRESSION_LEVELS[level]}",
+                    "-dDetectDuplicateImages=true",
+                    # Left to choose, Ghostscript sometimes stores grainy scans with
+                    # lossless Flate, which can be bigger than the original JPEG.
+                    "-dAutoFilterColorImages=false",
+                    "-dColorImageFilter=/DCTEncode",
+                    "-dAutoFilterGrayImages=false",
+                    "-dGrayImageFilter=/DCTEncode",
+                    f"-sOutputFile={output_path}",
+                    str(input_path),
+                ],
+                timeout=compression_timeout(page_count),
+            )
         if result.returncode != 0 or not output_path.exists() or output_path.stat().st_size == 0:
             detail = result.stderr.strip() or result.stdout.strip()
             raise RuntimeError(detail or "Ghostscript no pudo comprimir el documento.")
@@ -1211,8 +1304,7 @@ def protect_pdf(
                 )
             writer = PdfWriter(clone_from=reader)
             writer.encrypt(user_password=password, owner_password=password, algorithm="AES-256")
-            output = BytesIO()
-            writer.write(output)
+            output_path = write_pdf_to_file(writer)
             writer.close()
         except HTTPException:
             raise
@@ -1221,7 +1313,7 @@ def protect_pdf(
     finally:
         file.file.close()
 
-    return pdf_attachment(output.getvalue(), clean_output_name(output_name))
+    return file_download(output_path, clean_output_name(output_name))
 
 
 @app.post("/api/unlock")
@@ -1250,8 +1342,7 @@ def unlock_pdf(
                     raise HTTPException(status_code=400, detail="Escribe la contraseña del PDF.")
                 raise HTTPException(status_code=400, detail="Contraseña incorrecta")
             writer = PdfWriter(clone_from=reader)
-            output = BytesIO()
-            writer.write(output)
+            output_path = write_pdf_to_file(writer)
             writer.close()
         except HTTPException:
             raise
@@ -1260,7 +1351,7 @@ def unlock_pdf(
     finally:
         file.file.close()
 
-    return pdf_attachment(output.getvalue(), clean_output_name(output_name))
+    return file_download(output_path, clean_output_name(output_name))
 
 
 # --- Numerar páginas y marca de agua -----------------------------------------
@@ -1495,8 +1586,7 @@ def stamp_pdf(
                 else:
                     overlay = stamp_overlay(page, watermark_stream(text, size, angle, width, height), alpha)
                 page.merge_page(overlay)
-            output = BytesIO()
-            writer.write(output)
+            output_path = write_pdf_to_file(writer)
             writer.close()
         except HTTPException:
             raise
@@ -1506,13 +1596,7 @@ def stamp_pdf(
         file.file.close()
 
     default_name = f"{Path(file.filename).stem}-{suffix}.pdf"
-    return Response(
-        content=output.getvalue(),
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="{clean_output_name(output_name or default_name)}"',
-        },
-    )
+    return file_download(output_path, clean_output_name(output_name or default_name))
 
 
 # /Info entries kept on an edit besides the editable fields. Anything else
@@ -1629,8 +1713,7 @@ def edit_metadata(
         # The clone copied every object, including the old /Info and XMP
         # stream; drop whatever is no longer referenced so they are not written.
         writer.compress_identical_objects(remove_duplicates=False, remove_unreferenced=True)
-        output = BytesIO()
-        writer.write(output)
+        output_path = write_pdf_to_file(writer)
     except HTTPException:
         raise
     except Exception as error:
@@ -1644,8 +1727,504 @@ def edit_metadata(
         filename = clean_output_name(output_name)
     else:
         filename = clean_output_name(clean_base_name(Path(file.filename).stem, "documento") + "-metadatos")
-    return Response(
-        content=output.getvalue(),
+    return file_download(output_path, filename)
+
+
+# Flujo de trabajo: the chaining runs in the browser (static/workflow.js), which
+# calls the existing /api endpoints one after another, so only the page lives here.
+@app.get("/workflow", response_class=HTMLResponse)
+async def workflow_page():
+    return render_page("workflow.html")
+
+
+# Extract text (PDF to TXT). The text is streamed page by page into a file in
+# the documents folder, so a big document never becomes one huge string.
+TEXT_SEPARATORS = {"none", "formfeed", "header"}
+EMPTY_TEXT_MESSAGE = (
+    "No se encontró texto en el PDF. Probablemente es un documento escaneado: "
+    "pásalo primero por la herramienta OCR (/ocr) y vuelve a intentarlo."
+)
+
+
+@app.get("/extract-text", response_class=HTMLResponse)
+async def extract_text_page():
+    return render_page("extract-text.html")
+
+
+def clean_text_output_name(output_name: str, default: str) -> str:
+    """Like clean_output_name, but for a .txt file (same sanitisation rules)."""
+    name = clean_base_name(output_name, default)
+    if name.lower().endswith((".txt", ".pdf")):
+        name = name[:-4].strip(" .") or default
+    return f"{name}.txt"
+
+
+def normalize_text(text: str) -> str:
+    # pdfium ends lines with \r\n; NULs can appear in broken text layers.
+    return text.replace("\r\n", "\n").replace("\r", "\n").replace("\x00", "")
+
+
+def pdfium_page_text(document: pypdfium2.PdfDocument, index: int) -> str:
+    page = document[index]
+    try:
+        textpage = page.get_textpage()
+        try:
+            return normalize_text(textpage.get_text_range())
+        finally:
+            textpage.close()
+    finally:
+        page.close()
+
+
+@app.post("/api/extract-text")
+def extract_text(
+    file: UploadFile = File(...),
+    pages: str = Form(""),
+    page_separator: str = Form("header"),
+    output_name: str = Form(""),
+):
+    """Extract the text layer of a PDF as a UTF-8 .txt file.
+
+    pages uses the parse_page_ranges syntax ("1-3, 5"); empty means all pages.
+    page_separator: none, formfeed (a form feed between pages) or header
+    (a "--- Página N ---" line before each page).
+    """
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+    if page_separator not in TEXT_SEPARATORS:
+        raise HTTPException(status_code=400, detail="El separador de páginas no es válido.")
+    check_upload_sizes([file])
+
+    # Both files live in the documents folder, so the regular sweep removes
+    # them if the server stops halfway; normally they are deleted once sent.
+    DOCUMENTS_DIR.mkdir(exist_ok=True)
+    job_id = uuid.uuid4().hex
+    input_path = DOCUMENTS_DIR / f"{job_id}.in.pdf"
+    text_path = DOCUMENTS_DIR / f"{job_id}.txt"
+
+    def remove_job_files():
+        input_path.unlink(missing_ok=True)
+        text_path.unlink(missing_ok=True)
+
+    # A long extraction must not lose its files to the periodic sweep.
+    with protect_from_sweeper(input_path, text_path):
+        try:
+            with input_path.open("wb") as destination:
+                shutil.copyfileobj(file.file, destination)
+
+            character_count = 0
+            has_text = False
+            # pdfium is not thread-safe, so the whole extraction holds the lock.
+            with PDFIUM_LOCK:
+                document = open_pdfium_checked(input_path)
+                try:
+                    page_count = len(document)
+                    if pages.strip():
+                        numbers = [
+                            number
+                            for start, end in parse_page_ranges(pages, page_count)
+                            for number in range(start, end + 1)
+                        ]
+                    else:
+                        numbers = list(range(1, page_count + 1))
+
+                    with text_path.open("w", encoding="utf-8", newline="\n") as output:
+                        for position, number in enumerate(numbers):
+                            text = pdfium_page_text(document, number - 1).rstrip()
+                            character_count += len(text)
+                            has_text = has_text or bool(text.strip())
+                            if position:
+                                output.write("\n\f" if page_separator == "formfeed" else "\n\n")
+                            if page_separator == "header":
+                                output.write(f"--- Página {number} ---\n")
+                                if text:
+                                    output.write("\n")
+                            output.write(text)
+                        output.write("\n")
+                finally:
+                    document.close()
+
+            if not has_text:
+                raise HTTPException(status_code=400, detail=EMPTY_TEXT_MESSAGE)
+        except HTTPException:
+            remove_job_files()
+            raise
+        except Exception as error:
+            remove_job_files()
+            raise processing_error("No se pudo extraer el texto del PDF.", error) from error
+        finally:
+            file.file.close()
+
+    input_path.unlink(missing_ok=True)
+    filename = clean_text_output_name(output_name.strip() or Path(file.filename).stem, "texto")
+    return FileResponse(
+        text_path,
+        media_type="text/plain; charset=utf-8",
+        filename=filename,
+        headers={
+            "X-Page-Count": str(len(numbers)),
+            "X-Character-Count": str(character_count),
+        },
+        background=BackgroundTask(remove_job_files),
+    )
+
+
+# --- Firmar PDF (visual signature) -------------------------------------------
+# Places a drawn or uploaded signature image on pages of a document already in
+# the organizer's store. It is only a picture on the page, not a cryptographic
+# (digital) signature. Imports kept here so the whole tool is one block.
+from PIL import ImageOps  # noqa: E402
+from pypdf.generic import NumberObject  # noqa: E402
+
+SIGNATURE_IMAGE_FORMATS = ["PNG", "JPEG"]
+SIGNATURE_MAX_MB = 10
+SIGNATURE_MAX_SOURCE_PIXELS = 40_000_000
+SIGNATURE_MAX_SIDE = 2000
+SIGNATURE_MAX_PLACEMENTS = 200
+# Boxes may overshoot the page edge by this much (rounding in the browser).
+SIGNATURE_TOLERANCE = 0.001
+
+
+@app.get("/sign", response_class=HTMLResponse)
+async def sign_page():
+    return render_page("sign.html")
+
+
+def load_signature_image(file: UploadFile) -> Image.Image:
+    """Open the uploaded PNG/JPEG signature as an RGBA image of bounded size."""
+    check_upload_sizes([file])
+    if upload_size(file) > SIGNATURE_MAX_MB * 1024 * 1024:
+        raise HTTPException(
+            status_code=413,
+            detail=f"La imagen de la firma puede ocupar como máximo {SIGNATURE_MAX_MB} MB.",
+        )
+    invalid = HTTPException(status_code=400, detail="La firma debe ser una imagen PNG o JPEG.")
+    try:
+        # formats= keeps Pillow away from EPS (which would run Ghostscript)
+        # and every other format a signature does not need.
+        with Image.open(file.file, formats=SIGNATURE_IMAGE_FORMATS) as image:
+            if image.width * image.height > SIGNATURE_MAX_SOURCE_PIXELS:
+                raise HTTPException(status_code=400, detail="La imagen de la firma es demasiado grande.")
+            image.verify()
+        file.file.seek(0)
+        with Image.open(file.file, formats=SIGNATURE_IMAGE_FORMATS) as image:
+            signature = ImageOps.exif_transpose(image).convert("RGBA")
+    except HTTPException:
+        raise
+    except (UnidentifiedImageError, OSError, SyntaxError, ValueError, Image.DecompressionBombError) as error:
+        raise invalid from error
+    signature.thumbnail((SIGNATURE_MAX_SIDE, SIGNATURE_MAX_SIDE))
+    # A fully transparent or plain white image would "sign" with nothing
+    # visible and still use up the uploaded document.
+    on_white = Image.alpha_composite(Image.new("RGBA", signature.size, "white"), signature)
+    if on_white.convert("L").getextrema()[0] > 245:
+        raise HTTPException(status_code=400, detail="La imagen de la firma está vacía.")
+    return signature
+
+
+def parse_signature_placements(value: str) -> list[dict]:
+    """Validate the placements JSON: a list of {page, x, y, width, height}
+    with the box given as fractions of the page as displayed."""
+    invalid = HTTPException(status_code=400, detail="La lista de posiciones de la firma no es válida.")
+    outside = HTTPException(status_code=400, detail="La firma debe quedar dentro de la página.")
+    try:
+        items = json.loads(value)
+    except ValueError as error:
+        raise invalid from error
+    if not isinstance(items, list) or not items:
+        raise HTTPException(status_code=400, detail="Coloca la firma en al menos una página.")
+    if len(items) > SIGNATURE_MAX_PLACEMENTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Puedes colocar la firma como máximo {SIGNATURE_MAX_PLACEMENTS} veces.",
+        )
+
+    placements = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise invalid
+        page = item.get("page")
+        if isinstance(page, bool) or not isinstance(page, int):
+            raise invalid
+        box = {}
+        for key in ("x", "y", "width", "height"):
+            number = item.get(key)
+            if isinstance(number, bool) or not isinstance(number, (int, float)):
+                raise invalid
+            try:
+                # float() of a JSON integer with hundreds of digits overflows.
+                number = float(number)
+            except OverflowError:
+                raise invalid from None
+            if not math.isfinite(number):
+                raise invalid
+            box[key] = number
+        x, y, width, height = box["x"], box["y"], box["width"], box["height"]
+        if (
+            width <= 0 or height <= 0
+            or x < -SIGNATURE_TOLERANCE or y < -SIGNATURE_TOLERANCE
+            or x + width > 1 + SIGNATURE_TOLERANCE or y + height > 1 + SIGNATURE_TOLERANCE
+        ):
+            raise outside
+        # Pull a box that overshoots only by the tolerance back onto the page.
+        x, y = max(x, 0.0), max(y, 0.0)
+        width, height = min(width, 1.0 - x), min(height, 1.0 - y)
+        if width <= 0 or height <= 0:
+            raise outside
+        placements.append({"page": page, "x": x, "y": y, "width": width, "height": height})
+    return placements
+
+
+def signature_xobject(writer: PdfWriter, image: Image.Image):
+    """Add an RGBA image to the writer as an image XObject and return its
+    reference. The alpha channel becomes a soft mask, so the transparent parts
+    of the signature leave the page visible."""
+
+    def image_stream(data: bytes, color_space: str):
+        stream = DecodedStreamObject()
+        stream.set_data(data)
+        stream = stream.flate_encode()
+        stream.update({
+            NameObject("/Type"): NameObject("/XObject"),
+            NameObject("/Subtype"): NameObject("/Image"),
+            NameObject("/Width"): NumberObject(image.width),
+            NameObject("/Height"): NumberObject(image.height),
+            NameObject("/ColorSpace"): NameObject(color_space),
+            NameObject("/BitsPerComponent"): NumberObject(8),
+        })
+        return stream
+
+    picture = image_stream(image.convert("RGB").tobytes(), "/DeviceRGB")
+    alpha = image.getchannel("A")
+    if alpha.getextrema() != (255, 255):
+        # Streams must be indirect objects (pypdf would otherwise inline them
+        # in the dictionary), so both are registered with the writer.
+        picture[NameObject("/SMask")] = writer._add_object(image_stream(alpha.tobytes(), "/DeviceGray"))
+    return writer._add_object(picture)
+
+
+def signature_overlay(page: PageObject, xobject, boxes: list[dict]) -> PageObject:
+    """Build an overlay page that draws the signature in each box. Boxes are
+    fractions of the page as displayed (top-left origin); visible_page_box maps
+    them onto the page's own coordinates whatever its /Rotate and cropbox."""
+    matrix, width, height = visible_page_box(page)
+    drawing = []
+    for box in boxes:
+        left = box["x"] * width
+        bottom = (1 - box["y"] - box["height"]) * height
+        drawing.append(
+            f"q {pdf_number(box['width'] * width)} 0 0 {pdf_number(box['height'] * height)} "
+            f"{pdf_number(left)} {pdf_number(bottom)} cm /Signature Do Q"
+        )
+    content = DecodedStreamObject()
+    content.set_data(f"q {' '.join(matrix)} cm {' '.join(drawing)} Q".encode("ascii"))
+    overlay = PageObject.create_blank_page(
+        width=float(page.mediabox.width), height=float(page.mediabox.height)
+    )
+    overlay[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/XObject"): DictionaryObject({NameObject("/Signature"): xobject}),
+    })
+    overlay[NameObject("/Contents")] = content
+    return overlay
+
+
+@app.post("/api/documents/{document_id}/sign")
+def sign_document(
+    document_id: str,
+    signature: UploadFile = File(...),
+    placements: str = Form(...),
+    output_name: str = Form(""),
+):
+    try:
+        path = get_document_path(document_id)
+        boxes = parse_signature_placements(placements)
+        image = load_signature_image(signature)
+        try:
+            # An open file, not the path: pypdf reads a path fully into memory.
+            with protect_from_sweeper(path), path.open("rb") as source:
+                output_path = sign_to_file(source, boxes, image)
+        except FileNotFoundError:
+            raise document_gone() from None
+        except HTTPException:
+            raise
+        except Exception as error:
+            raise processing_error("No se pudo firmar el PDF.", error) from error
+        finally:
+            image.close()
+    finally:
+        signature.file.close()
+
+    # Like the organizer's save: the result is about to be downloaded, so the
+    # stored copy goes. If the user keeps working, the page uploads it again.
+    path.unlink(missing_ok=True)
+    return file_download(output_path, clean_output_name(output_name or "firmado.pdf"))
+
+
+def sign_to_file(source, boxes: list[dict], image: Image.Image) -> Path:
+    reader = open_pdf_reader(source)
+    page_count = len(reader.pages)
+    by_page: dict[int, list[dict]] = {}
+    for box in boxes:
+        if box["page"] < 1 or box["page"] > page_count:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Las páginas deben estar entre 1 y {page_count}.",
+            )
+        by_page.setdefault(box["page"], []).append(box)
+
+    writer = PdfWriter(clone_from=reader)
+    try:
+        xobject = signature_xobject(writer, image)
+        for number, page_boxes in by_page.items():
+            page = writer.pages[number - 1]
+            page.merge_page(signature_overlay(page, xobject, page_boxes))
+        return write_pdf_to_file(writer)
+    finally:
+        writer.close()
+
+
+# OCR: make a scanned PDF searchable with ocrmypdf + Tesseract. ocrmypdf runs
+# as a subprocess through run_tool, so a timeout kills it and every Tesseract
+# and Ghostscript worker it started.
+OCR_LANGUAGES = {"spa", "eng", "spa+eng"}
+OCR_JOBS = 2  # Tesseract workers per request, so one OCR does not take every core
+# Big scans are allowed: the limits are settings like the other ones, and the
+# cap (4 h by default) covers about 700 pages at the slow 20 s per page.
+OCR_MAX_PAGES = env_int("OCR_MAX_PAGES", 2000, 1, 100_000)
+OCR_TIMEOUT_BASE_SECONDS = env_int("OCR_TIMEOUT_SECONDS", 60, 10, 24 * 3600)
+OCR_TIMEOUT_PER_PAGE_SECONDS = env_int("OCR_SECONDS_PER_PAGE", 20, 0, 3600)
+OCR_TIMEOUT_MAX_SECONDS = env_int("OCR_MAX_TIMEOUT_SECONDS", 4 * 3600, 10, 7 * 24 * 3600)
+OCR_EXIT_ENCRYPTED = 8
+OCR_EXIT_MISSING_DEPENDENCY = 3
+OCR_EXIT_INVALID_CONFIG = 9  # e.g. a Tesseract language pack is missing
+OCR_MISSING_MESSAGE = "El OCR no está disponible: falta ocrmypdf o Tesseract en el servidor."
+
+
+def find_tesseract() -> str | None:
+    return shutil.which("tesseract") or shutil.which("tesseract.exe")
+
+
+def ocrmypdf_installed() -> bool:
+    return importlib.util.find_spec("ocrmypdf") is not None
+
+
+def ocr_available() -> bool:
+    return find_tesseract() is not None and ocrmypdf_installed()
+
+
+def ocr_timeout(page_count: int) -> float:
+    return min(OCR_TIMEOUT_BASE_SECONDS + OCR_TIMEOUT_PER_PAGE_SECONDS * page_count, OCR_TIMEOUT_MAX_SECONDS)
+
+
+def ocr_command(language: str, input_path: Path, output_path: Path) -> list[str]:
+    return [
+        sys.executable,
+        "-m",
+        "ocrmypdf",
+        # Pages that already have text are copied as they are, so a
+        # half-scanned document (or one that needs no OCR) does not fail.
+        "--skip-text",
+        "-l",
+        language,
+        # A plain PDF: PDF/A conversion is slower and changes more.
+        "--output-type",
+        "pdf",
+        "--optimize",
+        "0",
+        "--jobs",
+        str(OCR_JOBS),
+        "--quiet",
+        str(input_path),
+        str(output_path),
+    ]
+
+
+@app.get("/ocr", response_class=HTMLResponse)
+async def ocr_page():
+    return render_page("ocr.html")
+
+
+@app.post("/api/ocr")
+def ocr_pdf(
+    file: UploadFile = File(...),
+    language: str = Form("spa"),
+    output_name: str = Form(""),
+):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        file.file.close()
+        raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+    if language not in OCR_LANGUAGES:
+        file.file.close()
+        raise HTTPException(status_code=400, detail="El idioma del OCR no es válido.")
+    check_upload_sizes([file])
+
+    if not ocr_available():
+        file.file.close()
+        raise HTTPException(status_code=503, detail=OCR_MISSING_MESSAGE)
+
+    # Same layout as Compress: both files live in the documents folder, so the
+    # sweep removes them if the server stops halfway.
+    DOCUMENTS_DIR.mkdir(exist_ok=True)
+    job_id = uuid.uuid4().hex
+    input_path = DOCUMENTS_DIR / f"{job_id}.in.pdf"
+    output_path = DOCUMENTS_DIR / f"{job_id}.out.pdf"
+
+    def remove_job_files():
+        input_path.unlink(missing_ok=True)
+        output_path.unlink(missing_ok=True)
+
+    # OCR can run for hours on a big scan: keep the sweep away from its files.
+    with protect_from_sweeper(input_path, output_path):
+        try:
+            with input_path.open("wb") as destination:
+                shutil.copyfileobj(file.file, destination)
+            with PDFIUM_LOCK:
+                document = open_pdfium_checked(input_path)
+                try:
+                    page_count = len(document)
+                finally:
+                    document.close()
+            if page_count > OCR_MAX_PAGES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El OCR admite como máximo {OCR_MAX_PAGES} páginas por documento.",
+                )
+            # ocrmypdf keeps rasterized pages and intermediate PDFs in a scratch
+            # folder under TMPDIR. A timeout kills it before it can clean up, so it
+            # gets a private folder that is removed here whatever happens.
+            with tempfile.TemporaryDirectory(prefix="pdf-toolkit-ocr-") as scratch:
+                result = run_tool(
+                    ocr_command(language, input_path, output_path),
+                    timeout=ocr_timeout(page_count),
+                    env={**os.environ, "TMPDIR": scratch, "TEMP": scratch, "TMP": scratch},
+                )
+            if result.returncode == OCR_EXIT_ENCRYPTED:
+                raise encrypted_pdf()
+            if result.returncode in (OCR_EXIT_MISSING_DEPENDENCY, OCR_EXIT_INVALID_CONFIG):
+                logger.warning("ocrmypdf cannot run (exit %s): %s", result.returncode, result.stderr.strip())
+                raise HTTPException(status_code=503, detail=OCR_MISSING_MESSAGE)
+            if result.returncode != 0 or not output_path.exists() or output_path.stat().st_size == 0:
+                detail = result.stderr.strip() or result.stdout.strip()
+                raise RuntimeError(f"ocrmypdf exit {result.returncode}: {detail}")
+        except subprocess.TimeoutExpired as error:
+            remove_job_files()
+            raise HTTPException(status_code=504, detail="El OCR tardó demasiado.") from error
+        except HTTPException:
+            remove_job_files()
+            raise
+        except Exception as error:
+            remove_job_files()
+            raise processing_error("No se pudo aplicar el OCR al PDF.", error) from error
+        finally:
+            file.file.close()
+
+    if output_name.strip():
+        filename = clean_output_name(output_name)
+    else:
+        filename = clean_output_name(clean_base_name(Path(file.filename).stem, "documento") + "-ocr")
+    return FileResponse(
+        output_path,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        filename=filename,
+        background=BackgroundTask(remove_job_files),
     )
