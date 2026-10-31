@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 import pypdfium2
 from pypdf import PdfReader, PdfWriter
+from pypdf.generic import NameObject, TextStringObject
 from starlette.background import BackgroundTask
 
 
@@ -128,6 +129,11 @@ async def compress_page():
 @app.get("/pdf-to-images", response_class=HTMLResponse)
 async def pdf_to_images_page():
     return render_page("pdf-to-images.html")
+
+
+@app.get("/metadata", response_class=HTMLResponse)
+async def metadata_page():
+    return render_page("metadata.html")
 
 
 @app.get("/health")
@@ -1044,4 +1050,136 @@ def compress_pdf(
             "X-Compression-Applied": "true" if compressed else "false",
         },
         background=BackgroundTask(remove_job_files),
+    )
+
+
+# Editable document properties: form field -> /Info key.
+METADATA_FIELDS = {
+    "title": "/Title",
+    "author": "/Author",
+    "subject": "/Subject",
+    "keywords": "/Keywords",
+}
+MAX_METADATA_LENGTH = 500
+
+
+def open_metadata_reader(file: UploadFile) -> PdfReader:
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+    try:
+        reader = PdfReader(file.file)
+        if reader.is_encrypted and not reader.decrypt(""):
+            raise HTTPException(status_code=400, detail="El PDF está protegido con contraseña.")
+        len(reader.pages)
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=400, detail=f"No se pudo leer el PDF: {error}") from error
+    return reader
+
+
+def metadata_text(value) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def metadata_date(info, key: str) -> str | None:
+    if info.get(key) is None:
+        return None
+    try:
+        date = info.creation_date if key == "/CreationDate" else info.modification_date
+        return date.isoformat()
+    except Exception:
+        return metadata_text(info.get(key))
+
+
+@app.post("/api/metadata/read")
+def read_metadata(file: UploadFile = File(...)):
+    try:
+        reader = open_metadata_reader(file)
+        try:
+            info = reader.metadata
+        except Exception:
+            info = None
+        result = {field: None for field in (*METADATA_FIELDS, "creator", "producer")}
+        result.update(creation_date=None, modification_date=None)
+        if info:
+            for field, key in METADATA_FIELDS.items():
+                result[field] = metadata_text(info.get(key))
+            result["creator"] = metadata_text(info.get("/Creator"))
+            result["producer"] = metadata_text(info.get("/Producer"))
+            result["creation_date"] = metadata_date(info, "/CreationDate")
+            result["modification_date"] = metadata_date(info, "/ModDate")
+        result["pages"] = len(reader.pages)
+        return result
+    finally:
+        file.file.close()
+
+
+@app.post("/api/metadata")
+def edit_metadata(
+    file: UploadFile = File(...),
+    title: str = Form(""),
+    author: str = Form(""),
+    subject: str = Form(""),
+    keywords: str = Form(""),
+    remove_all: bool = Form(False),
+    output_name: str = Form(""),
+):
+    # The four fields replace the current values: an empty or missing field is
+    # removed. Creator, producer and dates are kept unless remove_all is set.
+    values = {"title": title, "author": author, "subject": subject, "keywords": keywords}
+    writer = None
+    try:
+        for field, value in values.items():
+            if len(value.strip()) > MAX_METADATA_LENGTH:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El campo «{field}» no puede superar {MAX_METADATA_LENGTH} caracteres.",
+                )
+        reader = open_metadata_reader(file)
+        writer = PdfWriter(clone_from=reader)
+        # The XMP stream repeats the same properties and viewers prefer it, so
+        # it is always dropped: otherwise the old values would still show up.
+        if "/Metadata" in writer.root_object:
+            del writer.root_object["/Metadata"]
+        if remove_all:
+            writer.metadata = None
+        else:
+            if writer._info is None:
+                writer.metadata = {}
+            info = writer._info.get_object()
+            for field, value in values.items():
+                key = METADATA_FIELDS[field]
+                if value.strip():
+                    info[NameObject(key)] = TextStringObject(value.strip())
+                elif key in info:
+                    del info[key]
+        # The clone copied every object, including the old /Info and XMP
+        # stream; drop whatever is no longer referenced so they are not written.
+        writer.compress_identical_objects(remove_identicals=False, remove_orphans=True)
+        output = BytesIO()
+        writer.write(output)
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se pudieron editar los metadatos: {error}",
+        ) from error
+    finally:
+        if writer is not None:
+            writer.close()
+        file.file.close()
+
+    if output_name.strip():
+        filename = clean_output_name(output_name)
+    else:
+        filename = clean_output_name(clean_base_name(Path(file.filename).stem, "documento") + "-metadatos")
+    return Response(
+        content=output.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

@@ -17,6 +17,7 @@ paths:
   | pages | pages.js (largest, ~450 lines) |
   | compress | compress.js |
   | pdf-to-images | pdf-to-images.js |
+  | metadata | metadata.js (reads `/api/metadata/read` on file choice to prefill) |
 
 - `office.js` is configured by data attributes on `#office-form`: `data-endpoint`, `data-extensions` (comma-separated, no dots), `data-default-name`, `data-missing-file`. Element ids are the same on all three pages (`office-input`, `office-dropzone`, `office-file-name`, `office-output-name`, `office-status`). A new Office-like tool is just a template with different data attributes.
 - `common.js` helpers:

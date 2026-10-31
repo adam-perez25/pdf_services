@@ -37,6 +37,10 @@ mismo servidor y no requiere un frontend independiente.
   mediante Ghostscript, ideal para documentos escaneados. Tres niveles: máxima
   (72 ppp), recomendada (150 ppp) y alta calidad (300 ppp). Si el resultado no
   es más pequeño, se descarga el original.
+- **Editar metadatos:** muestra y cambia el título, el autor, el asunto y las
+  palabras clave de un PDF, o elimina todos sus metadatos (incluido el bloque
+  XMP) antes de compartirlo, para no revelar quién lo creó, con qué programa ni
+  cuándo.
 - **Organizar páginas:** muestra una vista previa de cada página y permite
   girarlas, eliminarlas y reordenarlas (con los botones o arrastrándolas, también
   en pantallas táctiles manteniendo pulsada la página) antes de descargar el PDF
@@ -169,6 +173,7 @@ como constantes en `app/main.py`:
 | `OFFICE_TIMEOUT_SECONDS` | 120 s | Tiempo máximo de una conversión con LibreOffice; si se supera responde `504`. |
 | `COMPRESSION_TIMEOUT_SECONDS` | 600 s | Tiempo máximo de la compresión con Ghostscript; si se supera responde `504`. |
 | `MAX_IMAGE_PIXELS` | 40 000 000 | Límite de píxeles por imagen en **PDF a imágenes**. |
+| `MAX_METADATA_LENGTH` | 500 | Longitud máxima de cada campo en **Editar metadatos**. |
 
 Si una conversión o compresión supera su tiempo máximo, se termina el proceso
 externo junto con todos los procesos que haya iniciado.
@@ -179,8 +184,8 @@ de Docker.
 ## Interfaz web
 
 Cada herramienta tiene su propia página: `/` (inicio), `/merge`, `/split`,
-`/pages`, `/compress`, `/images`, `/pdf-to-images`, `/word`, `/excel` y
-`/powerpoint`.
+`/pages`, `/compress`, `/metadata`, `/images`, `/pdf-to-images`, `/word`,
+`/excel` y `/powerpoint`.
 
 ## API
 
@@ -199,6 +204,8 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 | `POST` | `/api/excel-to-pdf` | Convierte un archivo `.xls` o `.xlsx`. |
 | `POST` | `/api/powerpoint-to-pdf` | Convierte un archivo `.ppt` o `.pptx`. |
 | `POST` | `/api/compress` | Comprime un PDF; `level` es `strong`, `recommended` (por defecto) o `high`. Las cabeceras `X-Original-Size`, `X-Compressed-Size` y `X-Compression-Applied` indican el resultado. |
+| `POST` | `/api/metadata/read` | Devuelve en JSON los metadatos de un PDF (`title`, `author`, `subject`, `keywords`, `creator`, `producer`, `creation_date`, `modification_date`; `null` si faltan) y su número de páginas (`pages`). |
+| `POST` | `/api/metadata` | Escribe `title`, `author`, `subject` y `keywords` (máximo 500 caracteres cada uno; un campo vacío o ausente se elimina) y quita el bloque XMP. Con `remove_all=true` elimina todos los metadatos. La descarga se llama `<nombre>-metadatos.pdf` salvo que se indique `output_name`. |
 | `POST` | `/api/documents` | Sube un PDF una sola vez y devuelve su `id` y número de páginas. |
 | `GET` | `/api/documents/{id}/pages/{n}` | Devuelve la página `n` como JPEG; `width` controla el tamaño (100-2000 px). |
 | `POST` | `/api/documents/{id}/edit` | Genera el PDF editado a partir de `pages` sin volver a subir el archivo. |

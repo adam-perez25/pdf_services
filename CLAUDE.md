@@ -31,7 +31,7 @@ Spanish-language web PDF toolkit, `FastAPI(title="Unir PDF")` (`app/main.py:46`)
 - Page routes `GET /`, `/merge`, `/split`, ... (main.py:83-130) -> `render_page`.
 - Tool request: `postForm()` in common.js -> multipart POST `/api/*`. Handler is a sync `def`, so it runs in a worker thread (main.py:224). It validates the extension and options, processes the file, and returns an attachment named by `clean_output_name` (216). `file.file.close()` runs in `finally`.
 - Error codes: 400 bad input, 503 LibreOffice/Ghostscript missing, 504 timeout, 410 expired organizer document.
-- In memory: merge (226), pdf-info (271), split (288), images-to-pdf (693), edit-pages (646).
+- In memory: merge (226), pdf-info (271), split (288), images-to-pdf (693), edit-pages (646), metadata read/edit (end of file).
 - Temp files in DOCUMENTS_DIR, removed with a `BackgroundTask`: split-zip (366), pdf-to-images (754), compress (960).
 - Office: `convert_office_to_pdf` (885) uses a `TemporaryDirectory` and a throwaway LibreOffice profile.
 
@@ -46,6 +46,7 @@ Spanish-language web PDF toolkit, `FastAPI(title="Unir PDF")` (`app/main.py:46`)
   - Endpoints at main.py:548-673.
 - Images: `ALLOWED_IMAGE_FORMATS` (681), `a4_resolution`, `IMAGE_DPI_CHOICES` / `MAX_IMAGE_PIXELS` (748-751).
 - Compress: `COMPRESSION_LEVELS` (951) maps strong/recommended/high to Ghostscript `/screen` / `/ebook` / `/printer`. pdfium validates the file first, and Ghostscript runs with `-dSAFER`.
+- Metadata: `METADATA_FIELDS` / `MAX_METADATA_LENGTH` (500), `open_metadata_reader`, `POST /api/metadata/read` (JSON, prefills the form) and `POST /api/metadata` (pypdf clone; the 4 fields replace /Info values, empty = removed; XMP `/Metadata` always dropped; `remove_all` drops /Info; orphans removed with `compress_identical_objects` so old values are not written). Page `/metadata`, `metadata.js`.
 - Health: `/health` (133) returns 503 only if it cannot write to DOCUMENTS_DIR. It reports `libreoffice` and `ghostscript` as booleans.
 
 ### Data and state
@@ -73,6 +74,7 @@ Spanish-language web PDF toolkit, `FastAPI(title="Unir PDF")` (`app/main.py:46`)
 - The sweeper deletes anything in DOCUMENTS_DIR older than the TTL, including very slow in-flight jobs.
 - A container restart wipes organizer sessions; the UI recovers via 410 and re-upload.
 - Compress returns the original file if the output is not smaller (`X-Compression-Applied: false`).
+- FastAPI turns an empty optional form field into `None`, so `/api/metadata` uses `Form("")` and treats missing and empty the same (field removed).
 
 Area detail: `.claude/rules/map-frontend.md` (static/templates), `.claude/rules/map-tests.md` (tests).
 <!-- /project-map -->
