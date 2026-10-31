@@ -202,3 +202,41 @@ def test_pdf_with_only_owner_password_still_works(client):
     assert info.json() == {"pages": 2}
     assert upload.status_code == 200
     assert upload.json()["pages"] == 2
+
+
+def test_too_big_content_length_is_rejected_before_reading(client, monkeypatch):
+    # Limit is MAX_TOTAL_UPLOAD_MB + MULTIPART_OVERHEAD_MB (1 MB) = ~1.01 MB.
+    monkeypatch.setattr(main, "MAX_TOTAL_UPLOAD_MB", 0.01)
+    body = make_pdf(1) + b"%" + b"x" * (1_200_000)
+
+    response = client.post("/api/pdf-info", files={"file": ("big.pdf", body, "application/pdf")})
+
+    assert response.status_code == 413
+    assert "petición" in response.json()["detail"]
+    assert response.headers["X-Frame-Options"] == "DENY"
+
+
+def test_chunked_upload_is_cut_off_at_the_limit(client, monkeypatch):
+    monkeypatch.setattr(main, "MAX_TOTAL_UPLOAD_MB", 0.01)
+    chunks_sent = []
+
+    def body():
+        # No Content-Length: the middleware has to count the bytes.
+        for _ in range(40):
+            chunks_sent.append(1)
+            yield b"x" * 65_536
+
+    response = client.post(
+        "/api/pdf-info",
+        content=body(),
+        headers={"Content-Type": "multipart/form-data; boundary=abc"},
+    )
+
+    assert response.status_code == 413
+    assert "petición" in response.json()["detail"]
+
+
+def test_requests_within_the_limit_pass_the_middleware(client):
+    response = client.post("/api/pdf-info", files={"file": ("a.pdf", make_pdf(2), "application/pdf")})
+
+    assert response.status_code == 200

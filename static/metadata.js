@@ -43,7 +43,12 @@ async function setMetadataFile(file) {
         if (!response.ok) throw new Error(await errorMessage(response, "No se pudieron leer los metadatos."));
         const data = JSON.parse(await response.text());
         if (token !== readToken) return;
-        FIELD_NAMES.forEach((name) => { fieldInput(name).value = data[name] || ""; });
+        // Setting .value ignores maxlength, so cut longer values to the limit the
+        // server accepts instead of failing on save.
+        FIELD_NAMES.forEach((name) => {
+            const input = fieldInput(name);
+            input.value = (data[name] || "").slice(0, input.maxLength);
+        });
         showDetails(data);
         setStatus("", false);
     } catch (error) {
