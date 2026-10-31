@@ -302,6 +302,13 @@ let running = false;
 let nameEdited = false;
 let lastResult = null; // { blob, title } of the last successful step
 
+// Any change to the files or steps makes a kept partial result stale: drop it
+// so the fallback button cannot download the output of an older chain.
+function forgetLastResult() {
+    lastResult = null;
+    workflowFallback.hidden = true;
+}
+
 // ---- Files (same list behaviour as merge.js) ----
 
 workflowInput.addEventListener("change", () => {
@@ -313,6 +320,7 @@ setupDropzone(workflowDropzone, (files) => setFiles(files.filter(isPdf)));
 function setFiles(files) {
     if (running) return;
     selectedFiles = files;
+    forgetLastResult();
     renderFiles();
 }
 
@@ -336,17 +344,22 @@ function renderFiles() {
             draggedIndex = index;
             item.classList.add("is-dragging");
         });
-        item.addEventListener("dragend", () => item.classList.remove("is-dragging"));
+        item.addEventListener("dragend", () => {
+            item.classList.remove("is-dragging");
+            draggedIndex = null;
+        });
         item.addEventListener("dragover", (event) => event.preventDefault());
         item.addEventListener("drop", (event) => {
             event.stopPropagation();
             moveFile(draggedIndex, index);
+            draggedIndex = null;
         });
         item.querySelector('[data-action="up"]').addEventListener("click", () => moveFile(index, index - 1));
         item.querySelector('[data-action="down"]').addEventListener("click", () => moveFile(index, index + 1));
         item.querySelector(".remove-button").addEventListener("click", () => {
             if (running) return;
             selectedFiles.splice(index, 1);
+            forgetLastResult();
             renderFiles();
         });
         workflowFiles.appendChild(item);
@@ -360,6 +373,7 @@ function moveFile(fromIndex, toIndex) {
     if (running || fromIndex === null || toIndex < 0 || toIndex >= selectedFiles.length || fromIndex === toIndex) return;
     const [file] = selectedFiles.splice(fromIndex, 1);
     selectedFiles.splice(toIndex, 0, file);
+    forgetLastResult();
     renderFiles();
 }
 
@@ -459,12 +473,14 @@ function moveStep(step, offset) {
     if (!canMove(index, offset)) return;
     steps.splice(index, 1);
     steps.splice(index + offset, 0, step);
+    forgetLastResult();
     renderSteps();
 }
 
 function removeStep(step) {
     if (running) return;
     steps = steps.filter((item) => item !== step);
+    forgetLastResult();
     renderSteps();
 }
 
@@ -476,6 +492,7 @@ function addStep(id) {
     const lastIndex = steps.findIndex((item) => item.definition.last);
     if (definition.last || lastIndex === -1) steps.push(step);
     else steps.splice(lastIndex, 0, step);
+    forgetLastResult();
     renderSteps();
 }
 
