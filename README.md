@@ -54,7 +54,9 @@ mismo servidor y no requiere un frontend independiente.
 - **Editar metadatos:** muestra y cambia el título, el autor, el asunto y las
   palabras clave de un PDF, o elimina todos sus metadatos (incluido el bloque
   XMP) antes de compartirlo, para no revelar quién lo creó, con qué programa ni
-  cuándo.
+  cuándo. Los cambios se guardan en el PDF descargado (`<nombre>-metadatos.pdf`),
+  tanto en la información clásica del documento como en un bloque XMP nuevo,
+  porque muchos visores (Adobe, las propiedades de Windows) solo leen el XMP.
 - **OCR (hacer buscable un PDF escaneado):** reconoce el texto de las páginas
   escaneadas con [OCRmyPDF](https://ocrmypdf.readthedocs.io/) y Tesseract y lo
   añade como una capa invisible, para poder buscar, seleccionar y copiar el
@@ -329,7 +331,7 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 | `POST` | `/api/unlock` | Quita la contraseña de un PDF protegido usando `password` (puede ir vacía si el PDF solo tiene restricciones de permisos). Responde `400` con `Contraseña incorrecta` si no coincide, o si el PDF no estaba protegido. |
 | `POST` | `/api/stamp` | Numera las páginas (`mode=numbers`, por defecto) o añade una marca de agua (`mode=watermark`). Números: `position` (`bottom-center` por defecto, `bottom-left`, `bottom-right`, `top-center`, `top-left`, `top-right`), `number_format` (`n` → `1`, `n-of-total` → `1 / N`, `page-n-of-total` → `Página 1 de N`; N es el último número), `start_number` (0-100000, por defecto 1) y `font_size` (6-72, por defecto 12). Marca de agua: `text` (obligatorio, hasta 100 caracteres), `font_size` (8-200, por defecto 60), `opacity` (0.1-1, por defecto 0.3) y `rotation` (`45` por defecto o `0`). `output_name` es opcional (`<nombre>-numerado.pdf` / `<nombre>-marca-de-agua.pdf`). |
 | `POST` | `/api/metadata/read` | Devuelve en JSON los metadatos de un PDF (`title`, `author`, `subject`, `keywords`, `creator`, `producer`, `creation_date`, `modification_date`; `null` si faltan) y su número de páginas (`pages`). |
-| `POST` | `/api/metadata` | Escribe `title`, `author`, `subject` y `keywords` (máximo 500 caracteres cada uno; un campo vacío o ausente se elimina), quita el bloque XMP y borra las entradas no estándar que añaden otros programas (se conservan creador, productor, fechas y `/Trapped`). Con `remove_all=true` elimina todos los metadatos. La descarga se llama `<nombre>-metadatos.pdf` salvo que se indique `output_name`. |
+| `POST` | `/api/metadata` | Escribe `title`, `author`, `subject` y `keywords` (máximo 500 caracteres cada uno; un campo vacío o ausente se elimina), sustituye el bloque XMP por uno nuevo con los mismos valores y borra las entradas no estándar que añaden otros programas (se conservan creador, productor, fechas y `/Trapped`). Con `remove_all=true` elimina todos los metadatos. La descarga se llama `<nombre>-metadatos.pdf` salvo que se indique `output_name`. |
 | `POST` | `/api/ocr` | Hace buscable un PDF escaneado con OCRmyPDF y Tesseract; `language` es `spa` (por defecto), `eng` o `spa+eng`. Las páginas que ya tienen texto se conservan. La descarga se llama `<nombre>-ocr.pdf` salvo que se indique `output_name`. Máximo `OCR_MAX_PAGES` páginas (2000 por defecto). |
 | `POST` | `/api/extract-text` | Extrae el texto de un PDF y lo devuelve como `text/plain; charset=utf-8` (`<nombre>.txt`, o `output_name` con extensión `.txt`). `pages` admite rangos (`1-3, 5`; vacío = todas), `page_separator` es `header` (por defecto, línea `--- Página N ---`), `formfeed` o `none`. Las cabeceras `X-Page-Count` y `X-Character-Count` indican páginas y caracteres extraídos. Responde `400` si el PDF no contiene texto (probablemente escaneado; usar OCR antes). |
 | `POST` | `/api/documents` | Sube un PDF una sola vez y devuelve su `id` y número de páginas. |

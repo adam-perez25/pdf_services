@@ -88,7 +88,11 @@ def test_edit_round_trip(client):
     assert reader.metadata["/Author"] == "Luis"
     assert "/Subject" not in reader.metadata
     assert reader.metadata["/Keywords"] == "uno"
-    assert "/Metadata" not in reader.trailer["/Root"]
+    # A fresh XMP packet repeats the new values (viewers that read XMP first
+    # must not show the old ones, or nothing).
+    xmp = reader.trailer["/Root"]["/Metadata"].get_object().get_data().decode("utf-8")
+    assert "Nuevo título" in xmp and "Luis" in xmp and "uno" in xmp
+    assert "Ana" not in xmp and "Informe anual" not in xmp
 
     data = read(client, response.content).json()
     assert data["title"] == "Nuevo título"
@@ -156,3 +160,20 @@ def test_custom_info_entries_are_removed_on_edit(client):
     assert metadata["/Title"] == "Nuevo"
     assert metadata["/Creator"] == "Writer"
     assert "/Trapped" in metadata
+
+
+def test_xmp_matches_info_and_is_escaped(client):
+    response = edit(client, make_pdf_with_metadata(), title='A <b> & "c"', author="Ñandú")
+
+    xmp = PdfReader(BytesIO(response.content)).trailer["/Root"]["/Metadata"].get_object().get_data().decode("utf-8")
+    assert "A &lt;b&gt; &amp; " in xmp and "<b>" not in xmp
+    assert "<rdf:li>Ñandú</rdf:li>" in xmp
+    assert "<pdf:Producer>LibreOffice</pdf:Producer>" in xmp
+    assert "<xmp:CreateDate>2026-01-15T10:30:00+01:00</xmp:CreateDate>" in xmp
+
+
+def test_pdf_date_to_xmp():
+    assert main.pdf_date_to_xmp("D:20260115103000+01'00'") == "2026-01-15T10:30:00+01:00"
+    assert main.pdf_date_to_xmp("D:20261031215455Z'") == "2026-10-31T21:54:55Z"
+    assert main.pdf_date_to_xmp("D:2026") == "2026-01-01T00:00:00"
+    assert main.pdf_date_to_xmp("not a date") is None
