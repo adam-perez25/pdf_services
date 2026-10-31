@@ -40,6 +40,12 @@ mismo servidor y no requiere un frontend independiente.
 - **Proteger PDF:** cifra un PDF con AES-256 para que solo se abra con
   contraseña, o quita la contraseña de un PDF protegido si se conoce. La
   contraseña solo se usa durante la petición: no se guarda ni se registra.
+- **Numerar páginas y marca de agua:** añade a todas las páginas el número de
+  página (formato `1`, `1 / N` o `Página 1 de N`, número inicial, tamaño y
+  posición arriba o abajo, a la izquierda, centrado o a la derecha) o un texto
+  de marca de agua centrado, horizontal o en diagonal, con opacidad
+  configurable. El texto usa la fuente Helvetica estándar (admite tildes y
+  eñes) y aparece derecho aunque las páginas estén giradas.
 - **Organizar páginas:** muestra una vista previa de cada página y permite
   girarlas, eliminarlas y reordenarlas (con los botones o arrastrándolas, también
   en pantallas táctiles manteniendo pulsada la página) antes de descargar el PDF
@@ -174,6 +180,11 @@ como constantes en `app/main.py`:
 | `MAX_IMAGE_PIXELS` | 40 000 000 | Límite de píxeles por imagen en **PDF a imágenes**. |
 | `MAX_UPLOAD_MB` | 50 MB | Tamaño máximo de cada archivo subido; si se supera responde `413`. |
 | `MAX_TOTAL_UPLOAD_MB` | 200 MB | Tamaño máximo de todos los archivos de una petición (**Unir PDF**, **Imágenes a PDF**); si se supera responde `413`. |
+| `STAMP_NUMBER_SIZE_RANGE` | 6-72 pt | Tamaños de letra admitidos para los números de página. |
+| `STAMP_WATERMARK_SIZE_RANGE` | 8-200 pt | Tamaños de letra admitidos para la marca de agua (se reduce si el texto no cabe). |
+| `STAMP_WATERMARK_MAX_LENGTH` | 100 | Longitud máxima del texto de la marca de agua. |
+| `STAMP_MAX_START_NUMBER` | 100 000 | Número inicial máximo de la numeración. |
+| `STAMP_MARGIN` | 28 pt | Distancia de los números de página al borde. |
 
 Si una conversión o compresión supera su tiempo máximo, se termina el proceso
 externo junto con todos los procesos que haya iniciado.
@@ -184,7 +195,7 @@ de Docker.
 ## Interfaz web
 
 Cada herramienta tiene su propia página: `/` (inicio), `/merge`, `/split`,
-`/pages`, `/compress`, `/protect`, `/images`, `/pdf-to-images`, `/word`,
+`/pages`, `/compress`, `/protect`, `/images`, `/pdf-to-images`, `/stamp`, `/word`,
 `/excel` y `/powerpoint`.
 
 La interfaz tiene modo oscuro automático: sigue la preferencia de tema claro u
@@ -209,6 +220,7 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 | `POST` | `/api/compress` | Comprime un PDF; `level` es `strong`, `recommended` (por defecto) o `high`. Las cabeceras `X-Original-Size`, `X-Compressed-Size` y `X-Compression-Applied` indican el resultado. |
 | `POST` | `/api/protect` | Cifra un PDF con AES-256 usando `password` (obligatoria, máximo 127 bytes). Responde `400` si el PDF ya estaba protegido. |
 | `POST` | `/api/unlock` | Quita la contraseña de un PDF protegido usando `password`. Responde `400` con `Contraseña incorrecta` si no coincide, o si el PDF no estaba protegido. |
+| `POST` | `/api/stamp` | Numera las páginas (`mode=numbers`, por defecto) o añade una marca de agua (`mode=watermark`). Números: `position` (`bottom-center` por defecto, `bottom-left`, `bottom-right`, `top-center`, `top-left`, `top-right`), `number_format` (`n` → `1`, `n-of-total` → `1 / N`, `page-n-of-total` → `Página 1 de N`; N es el último número), `start_number` (0-100000, por defecto 1) y `font_size` (6-72, por defecto 12). Marca de agua: `text` (obligatorio, hasta 100 caracteres), `font_size` (8-200, por defecto 60), `opacity` (0.1-1, por defecto 0.3) y `rotation` (`45` por defecto o `0`). `output_name` es opcional (`<nombre>-numerado.pdf` / `<nombre>-marca-de-agua.pdf`). |
 | `POST` | `/api/documents` | Sube un PDF una sola vez y devuelve su `id` y número de páginas. |
 | `GET` | `/api/documents/{id}/pages/{n}` | Devuelve la página `n` como JPEG; `width` controla el tamaño (100-2000 px). |
 | `POST` | `/api/documents/{id}/edit` | Genera el PDF editado a partir de `pages` sin volver a subir el archivo. |
