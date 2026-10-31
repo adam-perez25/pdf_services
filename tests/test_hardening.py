@@ -39,6 +39,11 @@ BIG_PDF = make_pdf(1) + b"%" + b"x" * 20_000
         ("/api/edit-pages", {"pages": '[{"page": 1}]'}),
         ("/api/pdf-to-images", {}),
         ("/api/compress", {}),
+        ("/api/protect", {"password": "secreto"}),
+        ("/api/unlock", {"password": "secreto"}),
+        ("/api/stamp", {}),
+        ("/api/metadata/read", {}),
+        ("/api/metadata", {}),
     ],
 )
 def test_single_pdf_endpoints_reject_too_big_files(client, small_limits, url, data):
@@ -124,6 +129,11 @@ def test_errors_do_not_leak_exception_text(client, monkeypatch, caplog):
         ("/api/split-zip", {}),
         ("/api/documents", {}),
         ("/api/edit-pages", {"pages": '[{"page": 1}]'}),
+        ("/api/protect", {"password": "secreto"}),
+        ("/api/unlock", {"password": "secreto"}),
+        ("/api/stamp", {}),
+        ("/api/metadata/read", {}),
+        ("/api/metadata", {}),
     ],
 )
 def test_corrupt_pdf_error_is_generic(client, url, data):
@@ -143,6 +153,9 @@ def test_corrupt_pdf_error_is_generic(client, url, data):
         ("/api/documents", {}),
         ("/api/edit-pages", {"pages": '[{"page": 1}]'}),
         ("/api/pdf-to-images", {}),
+        ("/api/stamp", {}),
+        ("/api/metadata/read", {}),
+        ("/api/metadata", {}),
     ],
 )
 def test_encrypted_pdf_is_rejected(client, documents_dir, url, data):

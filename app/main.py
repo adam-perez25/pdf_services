@@ -1146,6 +1146,7 @@ def protect_pdf(
     try:
         if not file.filename or not file.filename.lower().endswith(".pdf"):
             raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+        check_upload_sizes([file])
         check_password(password)
         try:
             reader = PdfReader(file.file)
@@ -1162,10 +1163,7 @@ def protect_pdf(
         except HTTPException:
             raise
         except Exception as error:
-            raise HTTPException(
-                status_code=400,
-                detail=f"No se pudo proteger el PDF: {error}",
-            ) from error
+            raise processing_error("No se pudo proteger el PDF.", error) from error
     finally:
         file.file.close()
 
@@ -1181,6 +1179,7 @@ def unlock_pdf(
     try:
         if not file.filename or not file.filename.lower().endswith(".pdf"):
             raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+        check_upload_sizes([file])
         # An empty password is allowed here: PDFs that only have an owner
         # password (restrictions, no password to open) decrypt with "".
         if password:
@@ -1203,10 +1202,7 @@ def unlock_pdf(
         except HTTPException:
             raise
         except Exception as error:
-            raise HTTPException(
-                status_code=400,
-                detail=f"No se pudo desbloquear el PDF: {error}",
-            ) from error
+            raise processing_error("No se pudo desbloquear el PDF.", error) from error
     finally:
         file.file.close()
 
@@ -1392,6 +1388,7 @@ def stamp_pdf(
     try:
         if not file.filename or not file.filename.lower().endswith(".pdf"):
             raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+        check_upload_sizes([file])
         if mode not in {"numbers", "watermark"}:
             raise HTTPException(status_code=400, detail="El modo debe ser numbers o watermark.")
 
@@ -1427,7 +1424,7 @@ def stamp_pdf(
             suffix = "marca-de-agua"
 
         try:
-            writer = PdfWriter(clone_from=PdfReader(file.file))
+            writer = PdfWriter(clone_from=open_pdf_reader(file.file))
             last = first + len(writer.pages) - 1 if mode == "numbers" else 0
             for index, page in enumerate(writer.pages):
                 _, width, height = visible_page_box(page)
@@ -1440,11 +1437,10 @@ def stamp_pdf(
             output = BytesIO()
             writer.write(output)
             writer.close()
+        except HTTPException:
+            raise
         except Exception as error:
-            raise HTTPException(
-                status_code=400,
-                detail=f"No se pudo modificar el PDF: {error}",
-            ) from error
+            raise processing_error("No se pudo modificar el PDF.", error) from error
     finally:
         file.file.close()
 
@@ -1471,15 +1467,14 @@ MAX_METADATA_LENGTH = 500
 def open_metadata_reader(file: UploadFile) -> PdfReader:
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+    check_upload_sizes([file])
     try:
-        reader = PdfReader(file.file)
-        if reader.is_encrypted and not reader.decrypt(""):
-            raise HTTPException(status_code=400, detail="El PDF está protegido con contraseña.")
+        reader = open_pdf_reader(file.file)
         len(reader.pages)
     except HTTPException:
         raise
     except Exception as error:
-        raise HTTPException(status_code=400, detail=f"No se pudo leer el PDF: {error}") from error
+        raise processing_error("No se pudo leer el PDF.", error) from error
     return reader
 
 
@@ -1570,10 +1565,7 @@ def edit_metadata(
     except HTTPException:
         raise
     except Exception as error:
-        raise HTTPException(
-            status_code=400,
-            detail=f"No se pudieron editar los metadatos: {error}",
-        ) from error
+        raise processing_error("No se pudieron editar los metadatos.", error) from error
     finally:
         if writer is not None:
             writer.close()
