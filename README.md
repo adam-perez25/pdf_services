@@ -228,6 +228,9 @@ variable falla.
 | `OCR_MAX_TIMEOUT_SECONDS` | 14400 s | 10-604800 | Tope del tiempo del OCR (4 horas); si se supera responde `504`. |
 | `DOCUMENT_TTL_SECONDS` | 1800 s (30 min) | 60-604800 | Tiempo sin uso tras el que se borran los documentos de **Organizar páginas** y los archivos temporales que hayan quedado. |
 | `DOCUMENT_SWEEP_SECONDS` | 300 s (5 min) | 10-86400 | Frecuencia de esa limpieza. |
+| `HEAVY_JOB_BUDGET_MB` | 2000 MB | 100-1000000 | Memoria estimada que pueden ocupar a la vez los trabajos grandes (ver más abajo). Pensado para el `mem_limit` de 3 GB: deja ~1 GB para Python y los trabajos pequeños. Súbelo junto con `mem_limit`. |
+| `HEAVY_JOB_WAIT_SECONDS` | 300 s | 1-86400 | Tiempo máximo que un trabajo grande espera su turno; si se supera responde `503` con `Retry-After`. |
+| `HEAVY_JOB_MAX_WAITING` | 10 | 1-1000 | Trabajos grandes que pueden esperar turno a la vez; si ya hay tantos esperando, el siguiente recibe `503` al momento (cada espera ocupa uno de los hilos del servidor). |
 
 Con los valores por defecto se pueden procesar PDF de más de 1000 páginas y
 varios cientos de MB. Como referencia, con un PDF de 200 MB y 1000 páginas
@@ -239,6 +242,21 @@ disco temporal del contenedor necesita espacio para la subida y el resultado.
 Si subes `MAX_UPLOAD_MB`, sube también `mem_limit` en `docker-compose.yml`
 (3 GB por defecto): las operaciones más pesadas usan unas 2-3 veces el tamaño
 del archivo en memoria.
+
+**Trabajos grandes a la vez.** Para que dos archivos enormes procesados a la
+vez no agoten la memoria del contenedor, cada herramienta estima la memoria
+que necesitará a partir del tamaño de la subida (por ejemplo, unas 1,5 veces
+el archivo al dividir o numerar, 3,5 veces al proteger, y una cantidad fija
+más para Ghostscript, Tesseract o LibreOffice; la tabla está en
+`HEAVY_JOB_ESTIMATES`) y la reserva de un presupuesto común
+(`HEAVY_JOB_BUDGET_MB`). Si no cabe, la petición espera su turno por orden de
+llegada; un trabajo mayor que todo el presupuesto se ejecuta solo. Los
+trabajos pequeños (archivos de menos de `HEAVY_JOB_SMALL_FILES_MB` en total,
+como los PDF habituales de pocos MB, o con una estimación menor de
+`HEAVY_JOB_MIN_MB`) nunca esperan, sea cual sea la herramienta. Si el turno no llega en
+`HEAVY_JOB_WAIT_SECONDS`, la respuesta es `503` («El servidor está ocupado con
+otros documentos grandes...») con la cabecera `Retry-After`. Las peticiones en
+espera ocupan un hilo del servidor (hay 40), lo que sobra para un uso personal.
 
 Otros valores fijos, definidos como constantes en `app/main.py`:
 
@@ -258,6 +276,9 @@ Otros valores fijos, definidos como constantes en `app/main.py`:
 | `SIGNATURE_MAX_PLACEMENTS` | 200 | Número máximo de firmas colocadas en una petición. |
 | `OCR_LANGUAGES` | `spa`, `eng`, `spa+eng` | Idiomas admitidos por el OCR. |
 | `OCR_JOBS` | 2 | Páginas que Tesseract procesa a la vez en cada petición de OCR. |
+| `HEAVY_JOB_MIN_MB` | 100 MB | Los trabajos con una estimación menor no reservan memoria ni esperan turno. |
+| `HEAVY_JOB_SMALL_FILES_MB` | 50 MB | Los trabajos sobre archivos que suman menos que esto no esperan turno en ninguna herramienta. |
+| `HEAVY_JOB_RETRY_AFTER_SECONDS` | 60 s | Valor de `Retry-After` cuando el servidor está ocupado. |
 
 Si una conversión, compresión u OCR supera su tiempo máximo, se termina el proceso
 externo junto con todos los procesos que haya iniciado. La limpieza periódica
@@ -283,7 +304,7 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 
 | Método | Ruta | Descripción |
 | --- | --- | --- |
-| `GET` | `/health` | Estado del servicio: `storage` (puede guardar archivos temporales), `libreoffice` (conversiones de Office disponibles) y `ghostscript` (compresión disponible) y `ocr` (OCRmyPDF y Tesseract disponibles). Responde `503` si no puede guardar archivos. |
+| `GET` | `/health` | Estado del servicio: `storage` (puede guardar archivos temporales), `libreoffice` (conversiones de Office disponibles) y `ghostscript` (compresión disponible) y `ocr` (OCRmyPDF y Tesseract disponibles), y `heavy_jobs` (`running`, `reserved_mb` y `waiting` de los trabajos grandes). Responde `503` si no puede guardar archivos. |
 | `POST` | `/api/merge` | Une varios PDF recibidos como `files`. |
 | `POST` | `/api/pdf-info` | Devuelve el número de páginas de un PDF. |
 | `POST` | `/api/split` | Extrae un rango mediante `start_page` y `end_page`. |
@@ -327,7 +348,8 @@ Los errores devuelven un JSON con `detail` en español:
 - `413`: un archivo supera `MAX_UPLOAD_MB` o el conjunto supera
   `MAX_TOTAL_UPLOAD_MB`.
 - `503`: falta LibreOffice, Ghostscript, OCRmyPDF o Tesseract (o un idioma
-  de Tesseract). `504`: la conversión, la compresión o el OCR tardó demasiado.
+  de Tesseract), o el servidor está ocupado con otros trabajos grandes y el
+  turno no llegó a tiempo (con `Retry-After`). `504`: la conversión, la compresión o el OCR tardó demasiado.
 - `410`: el documento de **Organizar páginas** o **Firmar PDF** ha caducado.
 
 La documentación interactiva generada por FastAPI está disponible en
