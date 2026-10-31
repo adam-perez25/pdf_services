@@ -117,6 +117,10 @@ docker build -t pdf-toolkit .
 docker run --rm --name pdf-toolkit-web -p 8000:8000 pdf-toolkit
 ```
 
+Sin Compose, los límites se pasan con `-e` (por ejemplo
+`-e MAX_UPLOAD_MB=800 -e MAX_TOTAL_UPLOAD_MB=1500`) y la memoria con
+`--memory=3g`; ver [Configuración](#configuración).
+
 La imagen incluye un `HEALTHCHECK` que consulta `/health` cada 30 segundos.
 `docker compose ps` muestra el contenedor como `healthy` cuando el servicio
 responde y puede guardar archivos temporales, y como `unhealthy` si deja de
@@ -171,20 +175,42 @@ disponibles. `GET /health` indica cuáles se han detectado.
 
 ## Configuración
 
-La aplicación no usa variables de entorno ni archivo `.env`: no necesita
-ninguna configuración para arrancar. Los valores principales están definidos
-como constantes en `app/main.py`:
+La aplicación no necesita ninguna configuración para arrancar. Los límites
+principales se pueden cambiar con variables de entorno (en Docker, en la
+sección `environment:` de `docker-compose.yml`, donde ya aparecen con sus
+valores por defecto; tras editarlos basta con `docker compose up -d`). Se leen
+una vez al arrancar: si una variable no es un número entero o está fuera de
+rango, el servicio no arranca y el registro (`docker compose logs`) indica qué
+variable falla.
+
+| Variable de entorno | Por defecto | Rango | Descripción |
+| --- | --- | --- | --- |
+| `MAX_UPLOAD_MB` | 500 MB | 1-100000 | Tamaño máximo de cada archivo subido; si se supera responde `413`. |
+| `MAX_TOTAL_UPLOAD_MB` | 1000 MB | 1-100000 | Tamaño máximo de todos los archivos de una petición (**Unir PDF**, **Imágenes a PDF**); si se supera responde `413`. No puede ser menor que `MAX_UPLOAD_MB`. |
+| `OFFICE_TIMEOUT_SECONDS` | 300 s | 10-86400 | Tiempo máximo de una conversión con LibreOffice; si se supera responde `504`. |
+| `COMPRESSION_TIMEOUT_SECONDS` | 600 s | 10-86400 | Tiempo base de la compresión con Ghostscript. |
+| `COMPRESSION_SECONDS_PER_PAGE` | 2 s | 0-600 | Tiempo extra por página: el límite es base + páginas × este valor (20 páginas: 640 s; 1000 páginas: 2600 s). Si se supera responde `504`. |
+| `COMPRESSION_MAX_TIMEOUT_SECONDS` | 3600 s | 10-604800 | Tope del tiempo de compresión (nunca menor que el tiempo base). |
+| `DOCUMENT_TTL_SECONDS` | 1800 s (30 min) | 60-604800 | Tiempo sin uso tras el que se borran los documentos de **Organizar páginas** y los archivos temporales que hayan quedado. |
+| `DOCUMENT_SWEEP_SECONDS` | 300 s (5 min) | 10-86400 | Frecuencia de esa limpieza. |
+
+Con los valores por defecto se pueden procesar PDF de más de 1000 páginas y
+varios cientos de MB. Como referencia, con un PDF de 200 MB y 1000 páginas
+(medido en un PC de sobremesa) unir dos copias tarda unos 9 s y usa unos
+500 MB de memoria; dividir, organizar, numerar o editar metadatos, 3-5 s y
+unos 300 MB; protegerlo, unos 650 MB; comprimirlo, unos 20 s. Los resultados
+se escriben en archivos temporales y se envían desde el disco, así que el
+disco temporal del contenedor necesita espacio para la subida y el resultado.
+Si subes `MAX_UPLOAD_MB`, sube también `mem_limit` en `docker-compose.yml`
+(3 GB por defecto): las operaciones más pesadas usan unas 2-3 veces el tamaño
+del archivo en memoria.
+
+Otros valores fijos, definidos como constantes en `app/main.py`:
 
 | Constante | Valor | Descripción |
 | --- | --- | --- |
-| `DOCUMENT_TTL_SECONDS` | 30 min | Tiempo sin uso tras el que se borra un documento de **Organizar páginas**. |
-| `DOCUMENT_SWEEP_SECONDS` | 5 min | Frecuencia de la limpieza de documentos caducados. |
-| `OFFICE_TIMEOUT_SECONDS` | 120 s | Tiempo máximo de una conversión con LibreOffice; si se supera responde `504`. |
-| `COMPRESSION_TIMEOUT_SECONDS` | 600 s | Tiempo máximo de la compresión con Ghostscript; si se supera responde `504`. |
-| `MAX_IMAGE_PIXELS` | 40 000 000 | Límite de píxeles por imagen en **PDF a imágenes**. |
-| `MAX_UPLOAD_MB` | 50 MB | Tamaño máximo de cada archivo subido; si se supera responde `413`. |
-| `MAX_TOTAL_UPLOAD_MB` | 200 MB | Tamaño máximo de todos los archivos de una petición (**Unir PDF**, **Imágenes a PDF**); si se supera responde `413`. |
 | `MULTIPART_OVERHEAD_MB` | 1 MB | Margen para los separadores y campos del formulario. Una petición mayor que `MAX_TOTAL_UPLOAD_MB` + este margen se rechaza con `413` antes de guardarse en disco (por su `Content-Length`, o en cuanto lo supera si no lo indica). |
+| `MAX_IMAGE_PIXELS` | 40 000 000 | Límite de píxeles por imagen en **PDF a imágenes**. |
 | `STAMP_NUMBER_SIZE_RANGE` | 6-72 pt | Tamaños de letra admitidos para los números de página. |
 | `STAMP_WATERMARK_SIZE_RANGE` | 8-200 pt | Tamaños de letra admitidos para la marca de agua (se reduce si el texto no cabe). |
 | `STAMP_WATERMARK_MAX_LENGTH` | 100 | Longitud máxima del texto de la marca de agua. |
@@ -193,7 +219,9 @@ como constantes en `app/main.py`:
 | `MAX_METADATA_LENGTH` | 500 | Longitud máxima de cada campo en **Editar metadatos**. |
 
 Si una conversión o compresión supera su tiempo máximo, se termina el proceso
-externo junto con todos los procesos que haya iniciado.
+externo junto con todos los procesos que haya iniciado. La limpieza periódica
+nunca borra los archivos de un trabajo que sigue en curso, aunque tarde más
+que `DOCUMENT_TTL_SECONDS` (por ejemplo, comprimir un PDF enorme).
 
 El puerto se elige al arrancar `uvicorn` (`--port`) o en el mapeo de puertos
 de Docker.
@@ -237,8 +265,8 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 
 Los documentos subidos a `/api/documents` se guardan en una carpeta temporal
 del contenedor y se eliminan en cuanto se descarga el PDF editado, al cerrar
-la página, tras 30 minutos sin uso (se comprueba cada 5 minutos) y al iniciar
-el servidor. Si se sigue editando después de descargar, la página vuelve a
+la página, tras 30 minutos sin uso (se comprueba cada 5 minutos; ambos
+valores son configurables) y al iniciar el servidor. Si se sigue editando después de descargar, la página vuelve a
 subir el archivo automáticamente.
 
 Los endpoints que generan archivos aceptan el campo opcional `output_name`
@@ -311,8 +339,9 @@ permite recursos del propio servidor, `X-Content-Type-Options: nosniff`,
 `X-Frame-Options: DENY` y `Referrer-Policy: no-referrer`). Los archivos de
 `/static` se sirven con `Cache-Control: no-cache` para que el navegador
 compruebe si hay una versión nueva tras reconstruir la imagen. Las subidas
-tienen un tamaño máximo (`MAX_UPLOAD_MB` y `MAX_TOTAL_UPLOAD_MB`) y
-`docker-compose.yml` limita la memoria del contenedor a 1 GB (`mem_limit`).
+tienen un tamaño máximo (`MAX_UPLOAD_MB` y `MAX_TOTAL_UPLOAD_MB`, 500 MB y
+1 GB por defecto) y `docker-compose.yml` limita la memoria del contenedor a
+3 GB (`mem_limit`).
 
 La interfaz no carga recursos externos: las fuentes Manrope y DM Mono se
 sirven desde `static/fonts/`, distribuidas bajo la SIL Open Font License, por

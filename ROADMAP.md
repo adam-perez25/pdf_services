@@ -17,6 +17,10 @@ Planned work for PDFService, ordered by priority. Each item is one branch.
 | Page numbers and watermark | `feature/stamp-pdf` | M | Stamp page numbers or a text watermark (position, size, opacity) on every page. |
 | Edit metadata | `feature/pdf-metadata` | S-M | View and edit title, author, subject, keywords; option to remove all metadata. |
 
+## Large PDFs (done, `feature/large-pdfs`)
+
+Limits and timeouts configurable via env vars (500 MB per file / 1 GB per request by default, compression timeout scaled per page), results streamed from disk instead of memory, sweeper skips in-flight job files, `mem_limit` 3g. Tested with 1500-page PDFs.
+
 ## Phase 3: Big features (after phases 1-2)
 
 | Item | Effort | Notes |
