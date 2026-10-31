@@ -1159,7 +1159,7 @@ def edit_metadata(
                     del info[key]
         # The clone copied every object, including the old /Info and XMP
         # stream; drop whatever is no longer referenced so they are not written.
-        writer.compress_identical_objects(remove_identicals=False, remove_orphans=True)
+        writer.compress_identical_objects(remove_duplicates=False, remove_unreferenced=True)
         output = BytesIO()
         writer.write(output)
     except HTTPException:
