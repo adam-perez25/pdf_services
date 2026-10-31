@@ -19,7 +19,9 @@ mismo servidor y no requiere un frontend independiente.
   descarga como un único ZIP (o como PDF si solo resulta un archivo).
 - **Imágenes a PDF:** convierte varias imágenes ordenadas en un único PDF,
   con una página por imagen. Cada página se ajusta al tamaño A4 en la
-  orientación de la imagen; las imágenes pequeñas no se amplían.
+  orientación de la imagen; las imágenes pequeñas no se amplían. Se aceptan
+  PNG, JPEG, WEBP, GIF, BMP y TIFF; otros formatos (por ejemplo EPS) se
+  rechazan.
 - **Word a PDF:** convierte archivos `.doc` y `.docx` mediante LibreOffice en
   modo headless.
 - **Excel a PDF:** convierte archivos `.xls` y `.xlsx`; todas las hojas del
@@ -28,7 +30,9 @@ mismo servidor y no requiere un frontend independiente.
   por diapositiva.
 - **PDF a imágenes:** convierte cada página de un PDF en una imagen PNG o JPG
   a 72, 150 o 300 ppp. Las imágenes se descargan juntas en un ZIP (o como una
-  sola imagen si el PDF tiene una página).
+  sola imagen si el PDF tiene una página). Las páginas muy grandes se
+  renderizan a menor resolución para no superar unos 40 millones de píxeles
+  por imagen.
 - **Comprimir PDF:** reduce el tamaño bajando la resolución de las imágenes
   mediante Ghostscript, ideal para documentos escaneados. Tres niveles: máxima
   (72 ppp), recomendada (150 ppp) y alta calidad (300 ppp). Si el resultado no
@@ -84,6 +88,10 @@ Para detener el servicio:
 ```bash
 docker compose down
 ```
+
+La imagen se basa en `python:3.12-slim`, instala LibreOffice (Writer, Calc e
+Impress), las fuentes Liberation y Ghostscript, y ejecuta el servicio con un
+usuario sin privilegios (`app`, UID `10001`) en lugar de `root`.
 
 El contenedor expone el puerto `8000`. Si ese puerto ya está ocupado, cambia
 el mapeo en `docker-compose.yml`; por ejemplo, `8080:8000` permite acceder a
@@ -143,8 +151,36 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 Cuando se ejecute fuera de Docker, LibreOffice debe estar instalado por
 separado para que funcionen **Word a PDF**, **Excel a PDF** y **PowerPoint a
-PDF**. Si no está disponible, esas operaciones responderán con un error y las demás herramientas seguirán
-disponibles.
+PDF** (se busca el ejecutable `soffice`), y Ghostscript para **Comprimir PDF**
+(`gs`, `gswin64c` o `gswin32c`). Si alguno no está disponible, esas
+operaciones responderán con un error y las demás herramientas seguirán
+disponibles. `GET /health` indica cuáles se han detectado.
+
+## Configuración
+
+La aplicación no usa variables de entorno ni archivo `.env`: no necesita
+ninguna configuración para arrancar. Los valores principales están definidos
+como constantes en `app/main.py`:
+
+| Constante | Valor | Descripción |
+| --- | --- | --- |
+| `DOCUMENT_TTL_SECONDS` | 30 min | Tiempo sin uso tras el que se borra un documento de **Organizar páginas**. |
+| `DOCUMENT_SWEEP_SECONDS` | 5 min | Frecuencia de la limpieza de documentos caducados. |
+| `OFFICE_TIMEOUT_SECONDS` | 120 s | Tiempo máximo de una conversión con LibreOffice; si se supera responde `504`. |
+| `COMPRESSION_TIMEOUT_SECONDS` | 600 s | Tiempo máximo de la compresión con Ghostscript; si se supera responde `504`. |
+| `MAX_IMAGE_PIXELS` | 40 000 000 | Límite de píxeles por imagen en **PDF a imágenes**. |
+
+Si una conversión o compresión supera su tiempo máximo, se termina el proceso
+externo junto con todos los procesos que haya iniciado.
+
+El puerto se elige al arrancar `uvicorn` (`--port`) o en el mapeo de puertos
+de Docker.
+
+## Interfaz web
+
+Cada herramienta tiene su propia página: `/` (inicio), `/merge`, `/split`,
+`/pages`, `/compress`, `/images`, `/pdf-to-images`, `/word`, `/excel` y
+`/powerpoint`.
 
 ## API
 
@@ -194,6 +230,11 @@ python -m pip install -r requirements-dev.txt
 python -m pytest
 ```
 
+`requirements-dev.txt` añade `pytest`, `httpx` (cliente de pruebas de
+FastAPI) y `openpyxl` y `python-pptx`, que se usan para generar los archivos
+de Excel y PowerPoint de las pruebas. La configuración de pytest está en
+`pytest.ini`.
+
 Las pruebas de conversión de Office y de compresión se omiten automáticamente si
 LibreOffice o Ghostscript no están instalados. Las pruebas no forman parte de la imagen de Docker.
 
@@ -202,12 +243,14 @@ LibreOffice o Ghostscript no están instalados. Las pruebas no forman parte de l
 ```text
 app/
   main.py             # Aplicación FastAPI y endpoints
-static/               # JavaScript y estilos de la interfaz
+static/               # JavaScript (uno por herramienta, más common.js) y estilos
   fonts/              # Fuentes Manrope y DM Mono incluidas (licencia OFL)
-templates/            # Páginas HTML
+templates/            # Páginas HTML de cada herramienta
+tests/                # Pruebas con pytest (conftest.py y una por herramienta)
 Dockerfile            # Imagen de producción
 docker-compose.yml    # Servicio para Docker Compose
-tests/                # Pruebas con pytest
+.dockerignore         # Archivos excluidos de la imagen
+pytest.ini            # Configuración de pytest
 requirements.txt      # Dependencias de Python
 requirements-dev.txt  # Dependencias para ejecutar las pruebas
 ```
@@ -220,6 +263,13 @@ autenticación, límites de tamaño y frecuencia de subida, HTTPS y una polític
 de gestión de errores y registros. Los documentos subidos pueden contener
 información sensible: utiliza el servicio únicamente en un entorno de
 confianza y revisa la configuración de red del despliegue.
+
+Ya incluido: el contenedor se ejecuta sin privilegios de `root`, y todas las
+respuestas llevan cabeceras de seguridad (`Content-Security-Policy` que solo
+permite recursos del propio servidor, `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY` y `Referrer-Policy: no-referrer`). Los archivos de
+`/static` se sirven con `Cache-Control: no-cache` para que el navegador
+compruebe si hay una versión nueva tras reconstruir la imagen.
 
 La interfaz no carga recursos externos: las fuentes Manrope y DM Mono se
 sirven desde `static/fonts/`, distribuidas bajo la SIL Open Font License, por
