@@ -34,6 +34,9 @@ PDFIUM_LOCK = threading.Lock()
 THUMBNAIL_WIDTH = 300
 MIN_RENDER_WIDTH = 100
 MAX_RENDER_WIDTH = 2000
+# Upload limits: per file, and for all the files of one request (merge, images).
+MAX_UPLOAD_MB = 50
+MAX_TOTAL_UPLOAD_MB = 200
 logger = logging.getLogger("uvicorn.error")
 
 
@@ -220,6 +223,68 @@ def clean_output_name(output_name: str) -> str:
     return name
 
 
+def upload_size(file: UploadFile) -> int:
+    # The upload is already spooled (to disk when big), so seeking to the end
+    # measures it without reading it into memory.
+    position = file.file.tell()
+    file.file.seek(0, os.SEEK_END)
+    size = file.file.tell()
+    file.file.seek(position)
+    return size
+
+
+def check_upload_sizes(files: list[UploadFile]) -> None:
+    """Reject the request with 413 if a file or all of them together are too big."""
+    megabyte = 1024 * 1024
+    sizes = [upload_size(file) for file in files]
+    if any(size > MAX_UPLOAD_MB * megabyte for size in sizes):
+        detail = f"Cada archivo puede ocupar como máximo {MAX_UPLOAD_MB} MB."
+    elif sum(sizes) > MAX_TOTAL_UPLOAD_MB * megabyte:
+        detail = f"Los archivos no pueden ocupar más de {MAX_TOTAL_UPLOAD_MB} MB en total."
+    else:
+        return
+    for file in files:
+        file.file.close()
+    raise HTTPException(status_code=413, detail=detail)
+
+
+def processing_error(message: str, error: Exception) -> HTTPException:
+    # The raw error can expose internals (paths, library messages), so users
+    # only get the Spanish message and the details go to the server log.
+    logger.warning(message, exc_info=error)
+    return HTTPException(status_code=400, detail=message)
+
+
+ENCRYPTED_PDF_MESSAGE = (
+    "Este PDF está protegido con contraseña. Desbloquéalo antes de usar esta herramienta."
+)
+
+
+def encrypted_pdf() -> HTTPException:
+    return HTTPException(status_code=400, detail=ENCRYPTED_PDF_MESSAGE)
+
+
+def open_pdf_reader(source) -> PdfReader:
+    """Open a PDF with pypdf, rejecting it if it needs a password to be read.
+
+    PDFs with only an owner password (empty user password) open normally.
+    """
+    reader = PdfReader(source)
+    if reader.is_encrypted and not reader.decrypt(""):
+        raise encrypted_pdf()
+    return reader
+
+
+def open_pdfium_checked(path: Path) -> pypdfium2.PdfDocument:
+    """Open a PDF with pdfium, turning a password error into a clear 400."""
+    try:
+        return open_pdfium_document(path)
+    except pypdfium2.PdfiumError as error:
+        if getattr(error, "err_code", None) == pypdfium2.raw.FPDF_ERR_PASSWORD:
+            raise encrypted_pdf() from error
+        raise
+
+
 # The file-processing endpoints are plain functions, not async: FastAPI runs
 # them in a worker thread, so a long merge or conversion does not freeze the
 # server for everyone else.
@@ -230,6 +295,7 @@ def merge_pdfs(
 ):
     if not files:
         raise HTTPException(status_code=400, detail="Selecciona al menos un PDF.")
+    check_upload_sizes(files)
 
     writer = PdfWriter()
     try:
@@ -239,7 +305,7 @@ def merge_pdfs(
                     status_code=400,
                     detail="Todos los archivos deben tener extension PDF.",
                 )
-            writer.append(file.file)
+            writer.append(open_pdf_reader(file.file))
 
         output = BytesIO()
         writer.write(output)
@@ -250,10 +316,7 @@ def merge_pdfs(
         raise
     except Exception as error:
         writer.close()
-        raise HTTPException(
-            status_code=400,
-            detail=f"No se pudieron unir los PDFs: {error}",
-        ) from error
+        raise processing_error("No se pudieron unir los PDFs.", error) from error
     finally:
         for file in files:
             file.file.close()
@@ -272,15 +335,15 @@ def merge_pdfs(
 def pdf_info(file: UploadFile = File(...)):
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+    check_upload_sizes([file])
 
     try:
-        reader = PdfReader(file.file)
+        reader = open_pdf_reader(file.file)
         return {"pages": len(reader.pages)}
+    except HTTPException:
+        raise
     except Exception as error:
-        raise HTTPException(
-            status_code=400,
-            detail=f"No se pudo leer el PDF: {error}",
-        ) from error
+        raise processing_error("No se pudo leer el PDF.", error) from error
     finally:
         file.file.close()
 
@@ -294,9 +357,10 @@ def split_pdf(
 ):
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+    check_upload_sizes([file])
 
     try:
-        reader = PdfReader(file.file)
+        reader = open_pdf_reader(file.file)
         page_count = len(reader.pages)
         end_page = end_page or page_count
         if start_page < 1 or end_page < start_page or end_page > page_count:
@@ -316,10 +380,7 @@ def split_pdf(
     except Exception as error:
         if isinstance(error, HTTPException):
             raise
-        raise HTTPException(
-            status_code=400,
-            detail=f"No se pudo dividir el PDF: {error}",
-        ) from error
+        raise processing_error("No se pudo dividir el PDF.", error) from error
     finally:
         file.file.close()
 
@@ -381,9 +442,10 @@ def split_pdf_zip(
         raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
     if mode not in {"pages", "ranges"}:
         raise HTTPException(status_code=400, detail="El modo debe ser pages o ranges.")
+    check_upload_sizes([file])
 
     try:
-        reader = PdfReader(file.file)
+        reader = open_pdf_reader(file.file)
         page_count = len(reader.pages)
         base = clean_base_name(base_name, "split-pdf")
         if base.lower().endswith(".pdf"):
@@ -436,10 +498,7 @@ def split_pdf_zip(
     except HTTPException:
         raise
     except Exception as error:
-        raise HTTPException(
-            status_code=400,
-            detail=f"No se pudo dividir el PDF: {error}",
-        ) from error
+        raise processing_error("No se pudo dividir el PDF.", error) from error
     finally:
         file.file.close()
 
@@ -549,6 +608,7 @@ def build_edited_pdf(reader: PdfReader, pages: str) -> bytes:
 def upload_document(file: UploadFile = File(...)):
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+    check_upload_sizes([file])
 
     remove_expired_documents()
     document_id = uuid.uuid4().hex
@@ -557,15 +617,15 @@ def upload_document(file: UploadFile = File(...)):
         with path.open("wb") as destination:
             shutil.copyfileobj(file.file, destination)
         with PDFIUM_LOCK:
-            document = open_pdfium_document(path)
+            document = open_pdfium_checked(path)
             page_count = len(document)
             document.close()
+    except HTTPException:
+        path.unlink(missing_ok=True)
+        raise
     except Exception as error:
         path.unlink(missing_ok=True)
-        raise HTTPException(
-            status_code=400,
-            detail=f"No se pudo leer el PDF: {error}",
-        ) from error
+        raise processing_error("No se pudo leer el PDF.", error) from error
     finally:
         file.file.close()
 
@@ -612,16 +672,13 @@ def edit_document(
 ):
     path = get_document_path(document_id)
     try:
-        content = build_edited_pdf(PdfReader(path), pages)
+        content = build_edited_pdf(open_pdf_reader(path), pages)
     except FileNotFoundError:
         raise document_gone() from None
     except HTTPException:
         raise
     except Exception as error:
-        raise HTTPException(
-            status_code=400,
-            detail=f"No se pudo editar el PDF: {error}",
-        ) from error
+        raise processing_error("No se pudo editar el PDF.", error) from error
 
     # The result is about to be downloaded, so the uploaded copy is no longer
     # needed. If the user keeps editing, the page uploads the file again.
@@ -651,16 +708,14 @@ def edit_pages(
 ):
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+    check_upload_sizes([file])
 
     try:
-        content = build_edited_pdf(PdfReader(file.file), pages)
+        content = build_edited_pdf(open_pdf_reader(file.file), pages)
     except HTTPException:
         raise
     except Exception as error:
-        raise HTTPException(
-            status_code=400,
-            detail=f"No se pudo editar el PDF: {error}",
-        ) from error
+        raise processing_error("No se pudo editar el PDF.", error) from error
     finally:
         file.file.close()
 
@@ -697,6 +752,7 @@ def images_to_pdf(
 ):
     if not images:
         raise HTTPException(status_code=400, detail="Selecciona al menos una imagen.")
+    check_upload_sizes(images)
 
     converted_images = []
     try:
@@ -722,10 +778,7 @@ def images_to_pdf(
     except HTTPException:
         raise
     except Exception as error:
-        raise HTTPException(
-            status_code=400,
-            detail=f"No se pudo convertir las imágenes: {error}",
-        ) from error
+        raise processing_error("No se pudieron convertir las imágenes.", error) from error
     finally:
         for image in converted_images:
             image.close()
@@ -769,6 +822,7 @@ def pdf_to_images(
         raise HTTPException(status_code=400, detail="El formato debe ser png o jpg.")
     if dpi not in IMAGE_DPI_CHOICES:
         raise HTTPException(status_code=400, detail="La resolución debe ser 72, 150 o 300 ppp.")
+    check_upload_sizes([file])
 
     pil_format, media_type = IMAGE_FORMATS[image_format]
     base = clean_base_name(base_name or Path(file.filename).stem, "pdf-images")
@@ -813,7 +867,7 @@ def pdf_to_images(
 
         # pdfium is not thread-safe, so the whole render holds the lock.
         with PDFIUM_LOCK:
-            document = pypdfium2.PdfDocument(input_path)
+            document = open_pdfium_checked(input_path)
             try:
                 page_count = len(document)
                 digits = max(3, len(str(page_count)))
@@ -829,12 +883,12 @@ def pdf_to_images(
                             archive.writestr(name, render_page_image(document, index))
             finally:
                 document.close()
+    except HTTPException:
+        remove_job_files()
+        raise
     except Exception as error:
         remove_job_files()
-        raise HTTPException(
-            status_code=400,
-            detail=f"No se pudo convertir el PDF en imágenes: {error}",
-        ) from error
+        raise processing_error("No se pudo convertir el PDF en imágenes.", error) from error
     finally:
         file.file.close()
 
@@ -894,6 +948,7 @@ def convert_office_to_pdf(
     if file_extension not in extensions:
         file.file.close()
         raise HTTPException(status_code=400, detail=f"El archivo debe ser {formats_label}.")
+    check_upload_sizes([file])
 
     soffice = find_soffice()
     if not soffice:
@@ -930,10 +985,7 @@ def convert_office_to_pdf(
     except subprocess.TimeoutExpired as error:
         raise HTTPException(status_code=504, detail="La conversión tardó demasiado.") from error
     except Exception as error:
-        raise HTTPException(
-            status_code=400,
-            detail=f"No se pudo convertir el documento: {error}",
-        ) from error
+        raise processing_error("No se pudo convertir el documento.", error) from error
     finally:
         file.file.close()
 
@@ -966,6 +1018,7 @@ def compress_pdf(
         raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
     if level not in COMPRESSION_LEVELS:
         raise HTTPException(status_code=400, detail="El nivel de compresión no es válido.")
+    check_upload_sizes([file])
 
     ghostscript = find_ghostscript()
     if not ghostscript:
@@ -992,7 +1045,7 @@ def compress_pdf(
         # Ghostscript "repairs" almost anything without failing, so make sure
         # this really is a readable PDF first.
         with PDFIUM_LOCK:
-            pypdfium2.PdfDocument(input_path).close()
+            open_pdfium_checked(input_path).close()
         result = run_tool(
             [
                 ghostscript,
@@ -1021,12 +1074,12 @@ def compress_pdf(
     except subprocess.TimeoutExpired as error:
         remove_job_files()
         raise HTTPException(status_code=504, detail="La compresión tardó demasiado.") from error
+    except HTTPException:
+        remove_job_files()
+        raise
     except Exception as error:
         remove_job_files()
-        raise HTTPException(
-            status_code=400,
-            detail=f"No se pudo comprimir el PDF: {error}",
-        ) from error
+        raise processing_error("No se pudo comprimir el PDF.", error) from error
     finally:
         file.file.close()
 
