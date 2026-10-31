@@ -19,6 +19,7 @@ import threading
 import time
 import unicodedata
 import uuid
+import warnings
 import zipfile
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -84,7 +85,9 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Unir PDF", lifespan=lifespan)
+# No /docs, /redoc or /openapi.json: the strict CSP breaks the Swagger pages
+# anyway, and the API is described in the README.
+app = FastAPI(title="Unir PDF", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 
 def max_request_bytes() -> int:
@@ -134,9 +137,77 @@ class UploadSizeLimit:
         await self.app(scope, limited_receive, send)
 
 
-# Added before the decorator middlewares below, so it runs inside them and
-# its 413 still gets the security headers.
+CROSS_SITE_MESSAGE = "Petición rechazada: solo se aceptan peticiones desde las páginas de este servidor."
+STATE_CHANGING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+DEFAULT_PORTS = {"http": "80", "https": "443"}
+
+
+def same_origin(origin: str, host: str) -> bool:
+    """Whether an Origin header (scheme://host[:port]) names this Host."""
+    scheme, separator, authority = origin.partition("://")
+    if not separator or not authority or "/" in authority or not host:
+        return False  # includes Origin: null (sandboxed pages, file:)
+
+    def normalize(value: str) -> str:
+        value = value.lower()
+        default = DEFAULT_PORTS.get(scheme.lower())
+        if default and value.endswith(f":{default}"):
+            value = value[: -len(default) - 1]
+        return value
+
+    return normalize(authority) == normalize(host)
+
+
+def is_cross_site(headers: dict[bytes, str]) -> bool:
+    fetch_site = headers.get(b"sec-fetch-site", "").strip().lower()
+    if fetch_site:
+        # Modern browsers: trust Sec-Fetch-Site ("same-origin" for the app's
+        # own pages, "none" when the user typed the URL).
+        return fetch_site in {"cross-site", "same-site"}
+    origin = headers.get(b"origin", "").strip()
+    # Older browsers: compare Origin with Host. "null" is let through: with
+    # Referrer-Policy: no-referrer browsers send it even for the app's own
+    # POSTs, and every browser that sends Sec-Fetch-Site is handled above.
+    if not origin or origin == "null":
+        return False
+    return not same_origin(origin, headers.get(b"host", "").strip())
+
+
+class CrossSiteRequestGuard:
+    """Reject POST/DELETE... under /api/ sent by pages of other sites (CSRF).
+
+    Without it any web page open in the browser could make it upload files
+    to this service or delete organizer documents. Browsers say where a
+    request comes from: Sec-Fetch-Site (cross-site or same-site means another
+    site, including another port of localhost) and Origin (must match the
+    Host). Requests without these headers (curl, scripts, tests) are allowed,
+    and so are the app's own pages (same-origin).
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if (
+            scope["type"] == "http"
+            and scope["method"] in STATE_CHANGING_METHODS
+            and scope["path"].startswith("/api/")
+        ):
+            headers = {}
+            for name, value in scope["headers"]:
+                headers.setdefault(name, value.decode("latin-1"))
+            if is_cross_site(headers):
+                response = JSONResponse({"detail": CROSS_SITE_MESSAGE}, status_code=403)
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+# Added before the decorator middlewares below, so they run inside them and
+# their 413 / 403 still get the security headers. The guard is outermost of
+# the two, so a cross-site upload is refused before its body is read.
 app.add_middleware(UploadSizeLimit)
+app.add_middleware(CrossSiteRequestGuard)
 # The slim image's MIME table has no entry for .woff2, so the bundled fonts
 # would otherwise be served as text/plain.
 mimetypes.add_type("font/woff2", ".woff2")
@@ -311,11 +382,21 @@ def render_page(template_name: str) -> HTMLResponse:
     return HTMLResponse(html)
 
 
+# Longest download name kept, not counting the extension, so a huge
+# output_name cannot make a huge Content-Disposition header.
+MAX_OUTPUT_NAME_LENGTH = 150
+
+
 def clean_base_name(output_name: str, default: str) -> str:
     name = Path(output_name.strip()).name
     name = re.sub(r"[^A-Za-z0-9._ -]", "_", name).strip(" .")
     if not name:
         name = default
+    stem, extension = os.path.splitext(name)
+    if len(extension) > 10:  # not a real extension, part of the name
+        stem, extension = name, ""
+    if len(stem) > MAX_OUTPUT_NAME_LENGTH:
+        name = (stem[:MAX_OUTPUT_NAME_LENGTH].strip(" .") or default) + extension
     return name
 
 
@@ -495,15 +576,26 @@ HEAVY_JOB_ESTIMATES = {
 }
 
 
-def job_estimate_mb(tool: str, *sizes: int) -> int:
+def job_estimate_mb(tool: str, *sizes: int, minimum_mb: int = 0) -> int:
     """Estimated memory in MB of running `tool` on files of these byte sizes.
 
     Small files give 0, so heavy_job lets them through without waiting.
+    `minimum_mb` is a floor that applies whatever the file sizes: a tiny
+    compressed image can decode to hundreds of MB (see decoded_image_mb).
     """
     if sum(sizes) < HEAVY_JOB_SMALL_FILES_MB * 1024 * 1024:
-        return 0
+        return minimum_mb
     factor, fixed = HEAVY_JOB_ESTIMATES[tool]
-    return math.ceil(factor * sum(sizes) / (1024 * 1024) + fixed)
+    return max(math.ceil(factor * sum(sizes) / (1024 * 1024) + fixed), minimum_mb)
+
+
+# Memory per pixel while an image is decoded and converted: the decoded image
+# (up to 4 bytes per pixel, RGBA) plus its RGB/RGBA copy.
+DECODED_BYTES_PER_PIXEL = 8
+
+
+def decoded_image_mb(pixels: int) -> int:
+    return math.ceil(pixels * DECODED_BYTES_PER_PIXEL / (1024 * 1024))
 
 
 class HeavyJobLimiter:
@@ -703,6 +795,29 @@ def parse_page_ranges(value: str, page_count: int) -> list[tuple[int, int]]:
     return ranges
 
 
+# Page lists that may repeat pages (extract-text ranges, split-zip parts, the
+# organizer's layout) are capped, so "1-2000,1-2000,..." cannot turn a small
+# request into millions of pages of work: at most PAGE_LIST_FACTOR times the
+# document's pages in total, but never less than PAGE_LIST_MIN_LIMIT (so a
+# 1-page document can still be repeated a few dozen times).
+PAGE_LIST_FACTOR = 10
+PAGE_LIST_MIN_LIMIT = 100
+SPLIT_MAX_RANGES = 500
+
+
+def page_list_limit(page_count: int) -> int:
+    return max(PAGE_LIST_FACTOR * page_count, PAGE_LIST_MIN_LIMIT)
+
+
+def check_page_list_total(total: int, page_count: int) -> None:
+    limit = page_list_limit(page_count)
+    if total > limit:
+        raise HTTPException(
+            status_code=400,
+            detail=f"La selección suma {total} páginas; el máximo para este PDF es {limit}.",
+        )
+
+
 def unique_pdf_names(names: list[str]) -> list[str]:
     # Two parts with the same name would overwrite each other inside the ZIP.
     seen: dict[str, int] = {}
@@ -750,6 +865,12 @@ def split_pdf_zip(
                 zip_name = f"{base}.zip"
             else:
                 parts = parse_page_ranges(ranges, page_count)
+                if len(parts) > SPLIT_MAX_RANGES:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Puedes indicar como máximo {SPLIT_MAX_RANGES} rangos.",
+                    )
+                check_page_list_total(sum(end - start + 1 for start, end in parts), page_count)
                 try:
                     given_names = [str(name) for name in json.loads(names)]
                 except (ValueError, TypeError) as error:
@@ -882,18 +1003,26 @@ def build_edited_pdf(reader: PdfReader, pages: str) -> bytes:
 
 
 def build_edited_writer(reader: PdfReader, pages: str) -> PdfWriter:
+    page_count = len(reader.pages)
     try:
         layout = json.loads(pages)
         if not isinstance(layout, list) or not layout:
             raise ValueError
+    except (ValueError, TypeError) as error:
+        raise HTTPException(
+            status_code=400,
+            detail="La lista de páginas no es válida.",
+        ) from error
+    # Checked before building anything: each entry adds a page to the result.
+    check_page_list_total(len(layout), page_count)
+    try:
         layout = [(int(item["page"]), int(item.get("rotation", 0))) for item in layout]
-    except (ValueError, TypeError, KeyError) as error:
+    except (ValueError, TypeError, KeyError, AttributeError) as error:
         raise HTTPException(
             status_code=400,
             detail="La lista de páginas no es válida.",
         ) from error
 
-    page_count = len(reader.pages)
     writer = PdfWriter()
     for page_number, rotation in layout:
         if page_number < 1 or page_number > page_count:
@@ -940,6 +1069,28 @@ def upload_document(file: UploadFile = File(...)):
     return {"id": document_id, "pages": page_count}
 
 
+# Previews are sized by width, so a very tall page (500 x 200000 pt) would
+# otherwise render as a bitmap of hundreds of megapixels. The area and each
+# side are capped; such a page just gets a narrower preview.
+THUMBNAIL_MAX_PIXELS = 8_000_000
+THUMBNAIL_MAX_SIDE = 16_000
+THUMBNAIL_MAX_SCALE = 4
+
+
+def thumbnail_scale(page_width: float, page_height: float, width: int) -> float:
+    """Scale for a preview `width` pixels wide, within the pixel caps."""
+    if not (math.isfinite(page_width) and math.isfinite(page_height)) or page_width <= 0 or page_height <= 0:
+        raise HTTPException(status_code=400, detail="El PDF tiene páginas con un tamaño no válido.")
+    scale = min(width / page_width, THUMBNAIL_MAX_SCALE)
+    pixels = page_width * page_height * scale * scale
+    if pixels > THUMBNAIL_MAX_PIXELS:
+        scale *= (THUMBNAIL_MAX_PIXELS / pixels) ** 0.5
+    longest = max(page_width, page_height) * scale
+    if longest > THUMBNAIL_MAX_SIDE:
+        scale *= THUMBNAIL_MAX_SIDE / longest
+    return scale
+
+
 @app.get("/api/documents/{document_id}/pages/{page}")
 def document_page_image(document_id: str, page: int, width: int = THUMBNAIL_WIDTH):
     path = get_document_path(document_id)
@@ -955,7 +1106,9 @@ def document_page_image(document_id: str, page: int, width: int = THUMBNAIL_WIDT
                     detail=f"La página debe estar entre 1 y {len(document)}.",
                 )
             pdf_page = document[page - 1]
-            bitmap = pdf_page.render(scale=min(width / pdf_page.get_width(), 4))
+            bitmap = pdf_page.render(
+                scale=thumbnail_scale(pdf_page.get_width(), pdf_page.get_height(), width)
+            )
             image = bitmap.to_pil()
             output = BytesIO()
             image.convert("RGB").save(output, format="JPEG", quality=80)
@@ -1043,6 +1196,42 @@ MIN_IMAGE_DPI = 72
 # Pillow also opens formats such as EPS, which it renders by running
 # Ghostscript on the upload; only plain raster formats are accepted.
 ALLOWED_IMAGE_FORMATS = ["PNG", "JPEG", "WEBP", "GIF", "BMP", "TIFF"]
+# A 47 KB PNG can declare 13000 x 13000 pixels and decode to ~700 MB, so the
+# size of every uploaded image is read from its header (no decoding) and
+# images over this many pixels are rejected. Pillow's own decompression-bomb
+# limit is set to the same value and its warning is turned into an error, so
+# no Image.open in this service decodes a bigger image either.
+IMAGE_MAX_PIXELS = 100_000_000
+Image.MAX_IMAGE_PIXELS = IMAGE_MAX_PIXELS
+warnings.simplefilter("error", Image.DecompressionBombWarning)
+IMAGE_TOO_BIG_MESSAGE = "La imagen {name} es demasiado grande (máximo {megapixels} millones de píxeles)."
+
+
+def image_pixels(file: UploadFile, formats: list[str], invalid: HTTPException) -> int:
+    """Pixels of an uploaded image read from its header, without decoding it.
+
+    Raises 400 if it is not an image of `formats` (`invalid`) or if it is
+    bigger than IMAGE_MAX_PIXELS. The file is left at position 0.
+    """
+    too_big = HTTPException(
+        status_code=400,
+        detail=IMAGE_TOO_BIG_MESSAGE.format(
+            name=file.filename or "seleccionada", megapixels=IMAGE_MAX_PIXELS // 1_000_000
+        ),
+    )
+    try:
+        file.file.seek(0)
+        with Image.open(file.file, formats=formats) as image:
+            pixels = image.width * image.height
+    except (Image.DecompressionBombWarning, Image.DecompressionBombError) as error:
+        raise too_big from error
+    except (UnidentifiedImageError, OSError, SyntaxError, ValueError) as error:
+        raise invalid from error
+    finally:
+        file.file.seek(0)
+    if pixels > IMAGE_MAX_PIXELS:
+        raise too_big
+    return pixels
 
 
 def a4_resolution(width: int, height: int) -> float:
@@ -1063,9 +1252,25 @@ def images_to_pdf(
         raise HTTPException(status_code=400, detail="Selecciona al menos una imagen.")
     check_upload_sizes(images)
 
+    def invalid_image(image_file: UploadFile) -> HTTPException:
+        return HTTPException(
+            status_code=400,
+            detail=f"El archivo {image_file.filename or 'seleccionado'} no es una imagen válida.",
+        )
+
     writer = PdfWriter()
     try:
-        with heavy_job(job_estimate_mb("images-to-pdf", *map(upload_size, images))):
+        # Sizes come from the headers, before anything is decoded. Images are
+        # decoded one at a time, so the biggest one sets the memory needed;
+        # it counts even for small files, so a pixel bomb waits its turn.
+        largest = max(
+            image_pixels(image_file, ALLOWED_IMAGE_FORMATS, invalid_image(image_file))
+            for image_file in images
+        )
+        estimate = job_estimate_mb(
+            "images-to-pdf", *map(upload_size, images), minimum_mb=decoded_image_mb(largest)
+        )
+        with heavy_job(estimate):
             # Pillow applies one resolution to every page, so each image becomes
             # its own one-page PDF at its own dpi and the pages are merged after.
             # Images are decoded one at a time: a decoded photo takes many times
@@ -1074,11 +1279,9 @@ def images_to_pdf(
                 try:
                     with Image.open(image_file.file, formats=ALLOWED_IMAGE_FORMATS) as image:
                         converted = image.convert("RGB")
-                except (UnidentifiedImageError, OSError) as error:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"El archivo {image_file.filename or 'seleccionado'} no es una imagen válida.",
-                    ) from error
+                except (UnidentifiedImageError, OSError, Image.DecompressionBombError,
+                        Image.DecompressionBombWarning) as error:
+                    raise invalid_image(image_file) from error
                 try:
                     page = BytesIO()
                     converted.save(page, format="PDF", resolution=a4_resolution(*converted.size))
@@ -1148,6 +1351,14 @@ def render_scale(width: float, height: float, dpi: int) -> float:
 PAGE_SELECTION_MAX_LENGTH = 1000
 
 
+def check_page_selection_length(pages: str) -> None:
+    if len(pages) > PAGE_SELECTION_MAX_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"La lista de páginas puede tener como máximo {PAGE_SELECTION_MAX_LENGTH} caracteres.",
+        )
+
+
 def selected_page_numbers(pages: str, page_count: int) -> list[int]:
     """1-based page numbers in the parse_page_ranges syntax; empty = all.
 
@@ -1155,13 +1366,9 @@ def selected_page_numbers(pages: str, page_count: int) -> list[int]:
     """
     if not pages.strip():
         return list(range(1, page_count + 1))
-    if len(pages) > PAGE_SELECTION_MAX_LENGTH:
-        # Repeating huge ranges ("1-2000,1-2000,...") would make the expansion
-        # below run for a long time before the duplicates are dropped.
-        raise HTTPException(
-            status_code=400,
-            detail=f"La lista de páginas puede tener como máximo {PAGE_SELECTION_MAX_LENGTH} caracteres.",
-        )
+    # Repeating huge ranges ("1-2000,1-2000,...") would make the expansion
+    # below run for a long time before the duplicates are dropped.
+    check_page_selection_length(pages)
     numbers = (
         number
         for start, end in parse_page_ranges(pages, page_count)
@@ -1391,6 +1598,51 @@ def powerpoint_to_pdf(
 
 OFFICE_TIMEOUT_SECONDS = env_int("OFFICE_TIMEOUT_SECONDS", 300, 10, 24 * 3600)
 
+# Settings written into each throwaway LibreOffice profile before converting.
+# Without them a document can make the server fetch linked resources: an image
+# linked to http://... is downloaded during the conversion (SSRF, tracking)
+# and one linked to file:///... is embedded in the PDF. Keys and values come
+# from LibreOffice's officecfg schema (Common.xcs, Writer.xcs, Calc.xcs,
+# Inet.xcs); the first one alone stops both cases (checked in Docker), the
+# rest are defense in depth.
+LIBREOFFICE_PROFILE_SETTINGS = [
+    # Block every link from a document outside the trusted locations (there
+    # are none), which covers linked graphics in ODF and OOXML files.
+    ("/org.openoffice.Office.Common/Security/Scripting", "BlockUntrustedRefererLinks", "true"),
+    # No embedded active content (OLE objects) and no DDE links.
+    ("/org.openoffice.Office.Common/Security/Scripting", "DisableActiveContent", "true"),
+    # Never update links on load (Writer: 2 = never; Calc: 1 = never).
+    ("/org.openoffice.Office.Writer/Content/Update", "Link", "2"),
+    ("/org.openoffice.Office.Calc/Content/Update", "Link", "1"),
+    # Anything that still tries HTTP(S) goes to a proxy on the discard port of
+    # localhost, where the connection is refused (2 = manual proxy).
+    ("/org.openoffice.Inet/Settings", "ooInetProxyType", "2"),
+    ("/org.openoffice.Inet/Settings", "ooInetHTTPProxyName", "127.0.0.1"),
+    ("/org.openoffice.Inet/Settings", "ooInetHTTPProxyPort", "9"),
+    ("/org.openoffice.Inet/Settings", "ooInetHTTPSProxyName", "127.0.0.1"),
+    ("/org.openoffice.Inet/Settings", "ooInetHTTPSProxyPort", "9"),
+    ("/org.openoffice.Inet/Settings", "ooInetNoProxy", ""),
+]
+
+
+def write_libreoffice_profile(profile_path: Path) -> None:
+    """Seed a new LibreOffice user profile with LIBREOFFICE_PROFILE_SETTINGS."""
+    items = "".join(
+        f'<item oor:path="{path}"><prop oor:name="{name}" oor:op="fuse">'
+        f"<value>{value}</value></prop></item>\n"
+        for path, name, value in LIBREOFFICE_PROFILE_SETTINGS
+    )
+    user_path = profile_path / "user"
+    user_path.mkdir(parents=True, exist_ok=True)
+    (user_path / "registrymodifications.xcu").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<oor:items xmlns:oor="http://openoffice.org/2001/registry" '
+        'xmlns:xs="http://www.w3.org/2001/XMLSchema" '
+        'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n'
+        f"{items}</oor:items>\n",
+        encoding="utf-8",
+    )
+
 
 def convert_office_to_pdf(
     file: UploadFile,
@@ -1422,6 +1674,7 @@ def convert_office_to_pdf(
             with input_path.open("wb") as destination:
                 shutil.copyfileobj(file.file, destination)
             profile_path = temporary_path / "profile"
+            write_libreoffice_profile(profile_path)
             result = run_tool(
                 [
                     soffice,
@@ -1469,6 +1722,40 @@ COMPRESSION_SECONDS_PER_PAGE = env_int("COMPRESSION_SECONDS_PER_PAGE", 2, 0, 600
 COMPRESSION_MAX_TIMEOUT_SECONDS = env_int("COMPRESSION_MAX_TIMEOUT_SECONDS", 3600, 10, 7 * 24 * 3600)
 
 
+# pdfium accepts the %PDF- header anywhere in the first 1024 bytes, but
+# Ghostscript runs whatever comes before it as PostScript: a "%!PS" program
+# followed by a valid PDF would pass the pdfium check and then execute.
+PDF_HEADER = b"%PDF-"
+PDF_HEADER_SEARCH_BYTES = 1024
+NOT_A_PDF_MESSAGE = "El archivo no es un PDF válido."
+
+
+def strip_before_pdf_header(path: Path) -> None:
+    """Make the job file start with %PDF- at byte 0 before an external tool reads it.
+
+    Bytes before the header (within PDF_HEADER_SEARCH_BYTES) are removed in
+    place; a file with no header there is rejected with 400.
+    """
+    with path.open("r+b") as handle:
+        offset = handle.read(PDF_HEADER_SEARCH_BYTES).find(PDF_HEADER)
+        if offset < 0:
+            raise HTTPException(status_code=400, detail=NOT_A_PDF_MESSAGE)
+        if offset == 0:
+            return
+        logger.warning("Removed %d bytes before the PDF header of an upload.", offset)
+        read_position, write_position = offset, 0
+        while True:
+            handle.seek(read_position)
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            handle.seek(write_position)
+            handle.write(chunk)
+            read_position += len(chunk)
+            write_position += len(chunk)
+        handle.truncate(write_position)
+
+
 def compression_timeout(page_count: int) -> float:
     scaled = COMPRESSION_TIMEOUT_SECONDS + COMPRESSION_SECONDS_PER_PAGE * page_count
     # The cap never cuts below the base timeout.
@@ -1509,6 +1796,7 @@ def compress_pdf(
                 protect_from_sweeper(input_path, output_path):
             with input_path.open("wb") as destination:
                 shutil.copyfileobj(file.file, destination)
+            strip_before_pdf_header(input_path)
             # Ghostscript "repairs" almost anything without failing, so make sure
             # this really is a readable PDF first.
             with PDFIUM_LOCK:
@@ -2134,11 +2422,14 @@ def extract_text(
                 try:
                     page_count = len(document)
                     if pages.strip():
-                        numbers = [
-                            number
-                            for start, end in parse_page_ranges(pages, page_count)
-                            for number in range(start, end + 1)
-                        ]
+                        # Unlike PDF to images, ranges keep their order and a
+                        # repeated page is extracted again, but the list is
+                        # as long as pdf-to-images allows and the total pages
+                        # are capped (checked before expanding anything).
+                        check_page_selection_length(pages)
+                        ranges = parse_page_ranges(pages, page_count)
+                        check_page_list_total(sum(end - start + 1 for start, end in ranges), page_count)
+                        numbers = [number for start, end in ranges for number in range(start, end + 1)]
                     else:
                         numbers = list(range(1, page_count + 1))
 
@@ -2204,28 +2495,47 @@ async def sign_page():
     return render_page("sign.html")
 
 
-def load_signature_image(file: UploadFile) -> Image.Image:
-    """Open the uploaded PNG/JPEG signature as an RGBA image of bounded size."""
+SIGNATURE_INVALID_MESSAGE = "La firma debe ser una imagen PNG o JPEG."
+
+
+def check_signature_upload(file: UploadFile) -> int:
+    """Check the signature's file size and pixel size (read from its header,
+    nothing is decoded yet) and return its pixel count."""
     check_upload_sizes([file])
     if upload_size(file) > SIGNATURE_MAX_MB * 1024 * 1024:
         raise HTTPException(
             status_code=413,
             detail=f"La imagen de la firma puede ocupar como máximo {SIGNATURE_MAX_MB} MB.",
         )
-    invalid = HTTPException(status_code=400, detail="La firma debe ser una imagen PNG o JPEG.")
+    # formats= keeps Pillow away from EPS (which would run Ghostscript) and
+    # every other format a signature does not need.
+    invalid = HTTPException(status_code=400, detail=SIGNATURE_INVALID_MESSAGE)
+    too_big = HTTPException(status_code=400, detail="La imagen de la firma es demasiado grande.")
     try:
-        # formats= keeps Pillow away from EPS (which would run Ghostscript)
-        # and every other format a signature does not need.
+        pixels = image_pixels(file, SIGNATURE_IMAGE_FORMATS, invalid)
+    except HTTPException as error:
+        if error is invalid:
+            raise
+        raise too_big from error  # over IMAGE_MAX_PIXELS
+    if pixels > SIGNATURE_MAX_SOURCE_PIXELS:
+        raise too_big
+    return pixels
+
+
+def load_signature_image(file: UploadFile) -> Image.Image:
+    """Open the uploaded PNG/JPEG signature as an RGBA image of bounded size."""
+    check_signature_upload(file)
+    invalid = HTTPException(status_code=400, detail=SIGNATURE_INVALID_MESSAGE)
+    try:
         with Image.open(file.file, formats=SIGNATURE_IMAGE_FORMATS) as image:
-            if image.width * image.height > SIGNATURE_MAX_SOURCE_PIXELS:
-                raise HTTPException(status_code=400, detail="La imagen de la firma es demasiado grande.")
             image.verify()
         file.file.seek(0)
         with Image.open(file.file, formats=SIGNATURE_IMAGE_FORMATS) as image:
             signature = ImageOps.exif_transpose(image).convert("RGBA")
     except HTTPException:
         raise
-    except (UnidentifiedImageError, OSError, SyntaxError, ValueError, Image.DecompressionBombError) as error:
+    except (UnidentifiedImageError, OSError, SyntaxError, ValueError, Image.DecompressionBombError,
+            Image.DecompressionBombWarning) as error:
         raise invalid from error
     signature.thumbnail((SIGNATURE_MAX_SIDE, SIGNATURE_MAX_SIDE))
     # A fully transparent or plain white image would "sign" with nothing
@@ -2352,11 +2662,16 @@ def sign_document(
     try:
         path = get_document_path(document_id)
         boxes = parse_signature_placements(placements)
-        image = load_signature_image(signature)
+        # The decoded signature counts towards the job's memory, so the
+        # pixel size is checked (and the image decoded) inside heavy_job.
+        decoded_mb = decoded_image_mb(check_signature_upload(signature))
+        image = None
         try:
             # An open file, not the path: pypdf reads a path fully into memory.
-            with protect_from_sweeper(path), heavy_job(job_estimate_mb("sign", path.stat().st_size)), \
+            with protect_from_sweeper(path), \
+                    heavy_job(job_estimate_mb("sign", path.stat().st_size, minimum_mb=decoded_mb)), \
                     path.open("rb") as source:
+                image = load_signature_image(signature)
                 output_path = sign_to_file(source, boxes, image)
         except FileNotFoundError:
             raise document_gone() from None
@@ -2365,7 +2680,8 @@ def sign_document(
         except Exception as error:
             raise processing_error("No se pudo firmar el PDF.", error) from error
         finally:
-            image.close()
+            if image is not None:
+                image.close()
     finally:
         signature.file.close()
 
@@ -2494,6 +2810,8 @@ def ocr_pdf(
         try:
             with input_path.open("wb") as destination:
                 shutil.copyfileobj(file.file, destination)
+            # ocrmypdf hands the file to Ghostscript too (see Compress).
+            strip_before_pdf_header(input_path)
             with PDFIUM_LOCK:
                 document = open_pdfium_checked(input_path)
                 try:
