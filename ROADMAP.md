@@ -30,6 +30,24 @@ Limits and timeouts configurable via env vars (500 MB per file / 1 GB per reques
 | Sign a PDF | `feature/sign-pdf` | `/sign`: draw or upload a signature, place it on any pages (visual signature, not a digital one). |
 | Extract text (PDF to TXT) | `feature/extract-text` | `/extract-text`: page ranges, separators, preview; points to OCR when the PDF has no text. |
 
+## Next (in this order)
+
+The service will become a microservice in a home lab, reachable from the local network. Splitting `app/main.py` comes before the new tools, so they land in small modules instead of growing a 3200-line file.
+
+| # | Item | Branch | Effort | Summary |
+|---|---|---|---|---|
+| 1 | CI and dependency updates | `chore/ci` | S | GitHub Actions running `python -m pytest` on push (Ubuntu with LibreOffice, Ghostscript, Tesseract via apt); Dependabot for pip, Docker and Actions (every dependency is pinned and several parse untrusted files). Done first so the split below is checked on every push. |
+| 2 | Split `app/main.py` into modules | `refactor/split-main` | M | 141 functions in one file. Turn `app/` into a package: config/limits, uploads and names, heavy-job limiter, external tools, and one router per tool. Tests monkeypatch module constants, so they must follow the new module paths. No behaviour change. |
+| 3 | Cancel long jobs | `feature/cancel-jobs` | M | `postForm` (`static/common.js`) keeps its request private, so the UI cannot cancel, and the server never notices a client that left: a closed tab keeps a 2-hour OCR running and its heavy-job reservation. Add a cancel button, and stop the LibreOffice / Ghostscript / OCR process (via `run_tool`) when the client disconnects. |
+| 4 | PDF/A and repair PDF | `feature/pdfa-repair` | M | Ghostscript is already in the image. PDF/A for official paperwork; repair re-saves damaged PDFs. Same pattern as compress (`strip_before_pdf_header`, `heavy_job`), plus a workflow step. |
+| 5 | Extract embedded images | `feature/extract-images` | S-M | Pull the original images out of a PDF (not a page render) into a ZIP with pypdf. |
+
+Bigger, later:
+
+- **Fill and flatten PDF forms:** list the AcroForm fields with their types, fill them, optionally lock them. L.
+- **Redaction:** only if it really removes the text underneath (e.g. render the page and re-OCR); a black box over live text is worse than no tool. L.
+- **Optional shared access key for the home lab:** a single key set by env var, if the network is ever shared with people who should not use it. No accounts, nothing stored. M.
+
 ## Ideas for later
 
 - ~~Limit concurrent heavy jobs (two 500 MB jobs at once can exceed the 3 GB memory limit).~~ Done in `feature/heavy-job-limits`: weighted memory budget (`HEAVY_JOB_BUDGET_MB`), FIFO wait, 503 + `Retry-After` after `HEAVY_JOB_WAIT_SECONDS`.
@@ -40,3 +58,4 @@ Limits and timeouts configurable via env vars (500 MB per file / 1 GB per reques
 - **PDF to Word:** LibreOffice's PDF import gives poor `.docx` output.
 - **Accounts or permanent storage:** the app deliberately keeps nothing.
 - **Search on the home page:** not needed with the current number of tools.
+- **Bind the port to localhost only:** the service is meant to be reachable from the home network (`8000:8000` stays as it is).
