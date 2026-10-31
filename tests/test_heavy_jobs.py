@@ -1,4 +1,5 @@
 """Heavy job limiter: a shared memory budget so big jobs do not run all at once."""
+import contextlib
 from io import BytesIO
 import json
 import os
@@ -14,6 +15,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 import app.main as main
+from conftest import make_pdf
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -262,3 +264,39 @@ def test_second_big_request_waits_for_the_first(client, sample_pdf, slow_compres
     assert second_result["response"].status_code == 200
     assert limiter.status() == {"running": 0, "reserved_mb": 0, "waiting": 0}
     assert list(documents_dir.iterdir()) == []
+
+
+def test_full_queue_answers_at_once():
+    limiter = main.HeavyJobLimiter()
+    assert limiter.acquire(80, 100, 0)
+    first = Waiter(limiter, 80)
+    wait_until(lambda: limiter.status()["waiting"] == 1)
+
+    started = time.monotonic()
+    # One already waits and the cap is 1: no waiting at all, even with time left.
+    assert limiter.acquire(80, 100, 5.0, max_waiting=1) is False
+    assert time.monotonic() - started < 1
+
+    limiter.release(80)
+    assert first.done.wait(3) and first.result is True
+    assert limiter.status() == {"running": 1, "reserved_mb": 80, "waiting": 0}
+
+
+def test_waiting_organizer_save_keeps_its_document(client, documents_dir, monkeypatch):
+    # While an organizer save waits for its turn, the stored document must be
+    # protected from the sweeper (it is registered before the wait starts).
+    upload = client.post("/api/documents", files={"file": ("a.pdf", make_pdf(2))})
+    path = documents_dir / f"{upload.json()['id']}.pdf"
+    seen = {}
+
+    @contextlib.contextmanager
+    def fake_heavy_job(megabytes, uploads=()):
+        seen["protected"] = path in main.ACTIVE_JOB_FILES
+        yield
+
+    monkeypatch.setattr(main, "heavy_job", fake_heavy_job)
+
+    response = client.post(f"/api/documents/{upload.json()['id']}/edit", data={"pages": '[{"page": 1}]'})
+
+    assert response.status_code == 200
+    assert seen["protected"] is True

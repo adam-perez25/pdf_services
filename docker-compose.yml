@@ -28,3 +28,4 @@ services:
       # raise it together with mem_limit.
       HEAVY_JOB_BUDGET_MB: "2000"
       HEAVY_JOB_WAIT_SECONDS: "300"
+      HEAVY_JOB_MAX_WAITING: "10"

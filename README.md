@@ -230,6 +230,7 @@ variable falla.
 | `DOCUMENT_SWEEP_SECONDS` | 300 s (5 min) | 10-86400 | Frecuencia de esa limpieza. |
 | `HEAVY_JOB_BUDGET_MB` | 2000 MB | 100-1000000 | Memoria estimada que pueden ocupar a la vez los trabajos grandes (ver más abajo). Pensado para el `mem_limit` de 3 GB: deja ~1 GB para Python y los trabajos pequeños. Súbelo junto con `mem_limit`. |
 | `HEAVY_JOB_WAIT_SECONDS` | 300 s | 1-86400 | Tiempo máximo que un trabajo grande espera su turno; si se supera responde `503` con `Retry-After`. |
+| `HEAVY_JOB_MAX_WAITING` | 10 | 1-1000 | Trabajos grandes que pueden esperar turno a la vez; si ya hay tantos esperando, el siguiente recibe `503` al momento (cada espera ocupa uno de los hilos del servidor). |
 
 Con los valores por defecto se pueden procesar PDF de más de 1000 páginas y
 varios cientos de MB. Como referencia, con un PDF de 200 MB y 1000 páginas

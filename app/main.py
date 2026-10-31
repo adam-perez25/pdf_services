@@ -454,6 +454,10 @@ def file_download(path: Path, filename: str, media_type: str = "application/pdf"
 HEAVY_JOB_BUDGET_MB = env_int("HEAVY_JOB_BUDGET_MB", 2000, 100, 1_000_000)
 # How long a request waits for its turn before giving up with a 503.
 HEAVY_JOB_WAIT_SECONDS = env_int("HEAVY_JOB_WAIT_SECONDS", 300, 1, 24 * 3600)
+# At most this many big jobs wait in line; more get a 503 at once. Each waiting
+# request holds one of the server's worker threads (about 40), and /health and
+# the small jobs need some of them too.
+HEAVY_JOB_MAX_WAITING = env_int("HEAVY_JOB_MAX_WAITING", 10, 1, 1000)
 # Jobs estimated below this many MB never wait and reserve nothing.
 HEAVY_JOB_MIN_MB = 100
 HEAVY_JOB_RETRY_AFTER_SECONDS = 60
@@ -507,10 +511,12 @@ class HeavyJobLimiter:
         self.reserved_mb = 0
         self.running = 0
 
-    def acquire(self, megabytes: int, budget: int, wait_seconds: float) -> bool:
+    def acquire(self, megabytes: int, budget: int, wait_seconds: float, max_waiting: int | None = None) -> bool:
         deadline = time.monotonic() + wait_seconds
         ticket = object()
         with self.condition:
+            if max_waiting is not None and len(self.queue) >= max_waiting:
+                return False
             self.queue.append(ticket)
             try:
                 while not (
@@ -555,7 +561,7 @@ def heavy_job(megabytes: int, uploads: list[UploadFile] = ()):
     if megabytes < HEAVY_JOB_MIN_MB:
         yield
         return
-    if not HEAVY_JOBS.acquire(megabytes, HEAVY_JOB_BUDGET_MB, HEAVY_JOB_WAIT_SECONDS):
+    if not HEAVY_JOBS.acquire(megabytes, HEAVY_JOB_BUDGET_MB, HEAVY_JOB_WAIT_SECONDS, HEAVY_JOB_MAX_WAITING):
         for upload in uploads:
             upload.file.close()
         raise HTTPException(
@@ -961,7 +967,7 @@ def edit_document(
     try:
         # An open file, not the path: given a path, pypdf reads the whole
         # file into memory first.
-        with heavy_job(job_estimate_mb("edit", path.stat().st_size)), protect_from_sweeper(path), \
+        with protect_from_sweeper(path), heavy_job(job_estimate_mb("edit", path.stat().st_size)), \
                 path.open("rb") as source:
             writer = build_edited_writer(open_pdf_reader(source), pages)
             try:
@@ -2185,7 +2191,7 @@ def sign_document(
         image = load_signature_image(signature)
         try:
             # An open file, not the path: pypdf reads a path fully into memory.
-            with heavy_job(job_estimate_mb("sign", path.stat().st_size)), protect_from_sweeper(path), \
+            with protect_from_sweeper(path), heavy_job(job_estimate_mb("sign", path.stat().st_size)), \
                     path.open("rb") as source:
                 output_path = sign_to_file(source, boxes, image)
         except FileNotFoundError:
