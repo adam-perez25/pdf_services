@@ -1,6 +1,6 @@
 # PDFService
 
-Web PDF toolkit (FastAPI + Uvicorn) run with Docker Compose. Merge, split, compress, convert images/Office files to PDF, PDF to images, page editor. The UI and README are in Spanish.
+Web PDF toolkit (FastAPI + Uvicorn) run with Docker Compose. Merge, split, compress, protect/unlock with a password, convert images/Office files to PDF, PDF to images, page editor. The UI and README are in Spanish.
 
 - Code: `app/main.py`. Templates in `templates/`, frontend assets in `static/`.
 - Tests: `python -m pytest` (config in `pytest.ini`, tests in `tests/`, one file per tool). Dev deps in `requirements-dev.txt`.
@@ -18,7 +18,7 @@ Remind the user of these when they fit what they are asking for:
 ## Project map
 
 ### Overview
-Spanish-language web PDF toolkit, `FastAPI(title="Unir PDF")` (`app/main.py:46`) served by uvicorn in Docker (`unir-pdf`, port 8000). No DB, no auth, no env vars; only temp files and in-memory work. Deps: fastapi, pypdf, Pillow, pypdfium2, python-multipart, uvicorn; LibreOffice and Ghostscript as external tools.
+Spanish-language web PDF toolkit, `FastAPI(title="Unir PDF")` (`app/main.py:46`) served by uvicorn in Docker (`unir-pdf`, port 8000). No DB, no auth, no env vars; only temp files and in-memory work. Deps: fastapi, pypdf, cryptography (pypdf AES-256), Pillow, pypdfium2, python-multipart, uvicorn; LibreOffice and Ghostscript as external tools.
 
 ### Layout
 - `app/main.py`: the whole backend (pages, API, middlewares, helpers). `app/__init__.py` is empty.
@@ -28,10 +28,10 @@ Spanish-language web PDF toolkit, `FastAPI(title="Unir PDF")` (`app/main.py:46`)
 
 ### Entry points and flow
 - `uvicorn app.main:app`. `lifespan` (main.py:40) runs `start_document_sweeper` (507): purge DOCUMENTS_DIR, then a daemon thread `sweep_documents_forever` (498).
-- Page routes `GET /`, `/merge`, `/split`, ... (main.py:83-130) -> `render_page`.
+- Page routes `GET /`, `/merge`, `/split`, ... (main.py:83-135, `/protect` last) -> `render_page`.
 - Tool request: `postForm()` in common.js -> multipart POST `/api/*`. Handler is a sync `def`, so it runs in a worker thread (main.py:224). It validates the extension and options, processes the file, and returns an attachment named by `clean_output_name` (216). `file.file.close()` runs in `finally`.
 - Error codes: 400 bad input, 503 LibreOffice/Ghostscript missing, 504 timeout, 410 expired organizer document.
-- In memory: merge (226), pdf-info (271), split (288), images-to-pdf (693), edit-pages (646).
+- In memory: merge (226), pdf-info (271), split (288), images-to-pdf (693), edit-pages (646), protect/unlock (end of file).
 - Temp files in DOCUMENTS_DIR, removed with a `BackgroundTask`: split-zip (366), pdf-to-images (754), compress (960).
 - Office: `convert_office_to_pdf` (885) uses a `TemporaryDirectory` and a throwaway LibreOffice profile.
 
@@ -46,6 +46,7 @@ Spanish-language web PDF toolkit, `FastAPI(title="Unir PDF")` (`app/main.py:46`)
   - Endpoints at main.py:548-673.
 - Images: `ALLOWED_IMAGE_FORMATS` (681), `a4_resolution`, `IMAGE_DPI_CHOICES` / `MAX_IMAGE_PIXELS` (748-751).
 - Compress: `COMPRESSION_LEVELS` (951) maps strong/recommended/high to Ghostscript `/screen` / `/ebook` / `/printer`. pdfium validates the file first, and Ghostscript runs with `-dSAFER`.
+- Protect: `/api/protect` and `/api/unlock` (end of main.py, after compress) use pypdf `PdfWriter(clone_from=reader)`; protect encrypts with `algorithm="AES-256"` (user = owner password) and rejects already-encrypted input, unlock rejects unencrypted input and answers 400 `Contraseña incorrecta`. `check_password` rejects empty or >`MAX_PASSWORD_BYTES` (127) passwords. Passwords are never logged nor echoed in errors; UI is `templates/protect.html` + `static/protect.js` (Proteger/Desbloquear select), tests in `tests/test_protect.py`.
 - Health: `/health` (133) returns 503 only if it cannot write to DOCUMENTS_DIR. It reports `libreoffice` and `ghostscript` as booleans.
 
 ### Data and state

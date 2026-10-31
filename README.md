@@ -37,6 +37,9 @@ mismo servidor y no requiere un frontend independiente.
   mediante Ghostscript, ideal para documentos escaneados. Tres niveles: máxima
   (72 ppp), recomendada (150 ppp) y alta calidad (300 ppp). Si el resultado no
   es más pequeño, se descarga el original.
+- **Proteger PDF:** cifra un PDF con AES-256 para que solo se abra con
+  contraseña, o quita la contraseña de un PDF protegido si se conoce. La
+  contraseña solo se usa durante la petición: no se guarda ni se registra.
 - **Organizar páginas:** muestra una vista previa de cada página y permite
   girarlas, eliminarlas y reordenarlas (con los botones o arrastrándolas, también
   en pantallas táctiles manteniendo pulsada la página) antes de descargar el PDF
@@ -179,8 +182,8 @@ de Docker.
 ## Interfaz web
 
 Cada herramienta tiene su propia página: `/` (inicio), `/merge`, `/split`,
-`/pages`, `/compress`, `/images`, `/pdf-to-images`, `/word`, `/excel` y
-`/powerpoint`.
+`/pages`, `/compress`, `/protect`, `/images`, `/pdf-to-images`, `/word`,
+`/excel` y `/powerpoint`.
 
 ## API
 
@@ -199,6 +202,8 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 | `POST` | `/api/excel-to-pdf` | Convierte un archivo `.xls` o `.xlsx`. |
 | `POST` | `/api/powerpoint-to-pdf` | Convierte un archivo `.ppt` o `.pptx`. |
 | `POST` | `/api/compress` | Comprime un PDF; `level` es `strong`, `recommended` (por defecto) o `high`. Las cabeceras `X-Original-Size`, `X-Compressed-Size` y `X-Compression-Applied` indican el resultado. |
+| `POST` | `/api/protect` | Cifra un PDF con AES-256 usando `password` (obligatoria, máximo 127 bytes). Responde `400` si el PDF ya estaba protegido. |
+| `POST` | `/api/unlock` | Quita la contraseña de un PDF protegido usando `password`. Responde `400` con `Contraseña incorrecta` si no coincide, o si el PDF no estaba protegido. |
 | `POST` | `/api/documents` | Sube un PDF una sola vez y devuelve su `id` y número de páginas. |
 | `GET` | `/api/documents/{id}/pages/{n}` | Devuelve la página `n` como JPEG; `width` controla el tamaño (100-2000 px). |
 | `POST` | `/api/documents/{id}/edit` | Genera el PDF editado a partir de `pages` sin volver a subir el archivo. |
