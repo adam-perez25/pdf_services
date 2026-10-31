@@ -763,8 +763,8 @@ def release_free_memory() -> None:
     if MALLOC_TRIM is None:
         return
     with _trim_lock:
-        if _trim_timer is not None:
-            _trim_timer.cancel()
+        if _trim_timer is not None and _trim_timer.is_alive():
+            return  # a trim is already due; it will cover this job too
         _trim_timer = threading.Timer(MALLOC_TRIM_DELAY_SECONDS, _trim_now)
         _trim_timer.daemon = True
         _trim_timer.start()
@@ -3171,12 +3171,25 @@ def ocr_pdf(
             # ocrmypdf keeps rasterized pages and intermediate PDFs in a scratch
             # folder under TMPDIR. A timeout kills it before it can clean up, so it
             # gets a private folder that is removed here whatever happens.
-            with tempfile.TemporaryDirectory(prefix="pdf-toolkit-ocr-") as scratch:
-                result = run_tool(
-                    ocr_command(language, input_path, output_path, image_pages),
-                    timeout=ocr_timeout(page_count),
-                    env={**os.environ, "TMPDIR": scratch, "TEMP": scratch, "TMP": scratch},
+            def run_ocr(pages: list[int]) -> subprocess.CompletedProcess:
+                with tempfile.TemporaryDirectory(prefix="pdf-toolkit-ocr-") as scratch:
+                    return run_tool(
+                        ocr_command(language, input_path, output_path, pages),
+                        timeout=ocr_timeout(page_count),
+                        env={**os.environ, "TMPDIR": scratch, "TEMP": scratch, "TMP": scratch},
+                    )
+
+            result = run_ocr(image_pages)
+            known_exits = (0, OCR_EXIT_ENCRYPTED, OCR_EXIT_MISSING_DEPENDENCY, OCR_EXIT_INVALID_CONFIG)
+            if image_pages and result.returncode not in known_exits:
+                # ocrmypdf refuses --redo-ocr on some PDFs (tagged or signed,
+                # depending on the version): try once more with --skip-text.
+                logger.warning(
+                    "ocrmypdf --redo-ocr failed (exit %s), retrying with --skip-text: %s",
+                    result.returncode, result.stderr.strip(),
                 )
+                output_path.unlink(missing_ok=True)
+                result = run_ocr([])
             if result.returncode == OCR_EXIT_ENCRYPTED:
                 raise encrypted_pdf()
             if result.returncode in (OCR_EXIT_MISSING_DEPENDENCY, OCR_EXIT_INVALID_CONFIG):

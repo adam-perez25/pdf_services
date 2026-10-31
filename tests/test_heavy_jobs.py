@@ -328,6 +328,20 @@ def test_big_jobs_return_freed_memory_with_malloc_trim(monkeypatch):
     assert trims == [0]  # two jobs ending together share one trim
 
 
+def test_steady_big_jobs_do_not_postpone_the_trim_forever(monkeypatch):
+    trims = []
+    monkeypatch.setattr(main, "MALLOC_TRIM", lambda pad: trims.append(pad) or 1)
+    monkeypatch.setattr(main, "MALLOC_TRIM_DELAY_SECONDS", 0.2)
+
+    # A job ends every 0.05 s for longer than the delay: one trim still runs.
+    deadline = time.monotonic() + 0.5
+    while time.monotonic() < deadline:
+        with main.heavy_job(main.HEAVY_JOB_MIN_MB):
+            pass
+        time.sleep(0.05)
+    assert trims, "the trim kept being postponed"
+
+
 def test_malloc_trim_is_optional(monkeypatch):
     # Windows and musl have no malloc_trim: releasing does nothing.
     monkeypatch.setattr(main, "MALLOC_TRIM", None)

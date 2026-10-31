@@ -201,3 +201,21 @@ def test_animated_gif_uses_only_the_first_frame(client):
     assert len(PdfReader(BytesIO(response.content)).pages) == 1
     red, green, blue = render_page(response.content).getpixel((20, 15))
     assert red > 200 and green < 60 and blue < 60
+
+
+def test_huge_later_tiff_frame_is_rejected(client):
+    # Pillow checks the size of the first frame only: a tiny TIFF whose second
+    # frame is 14000x14000 would decode to ~600 MB without this check.
+    small = Image.new("1", (10, 10), 1)
+    huge = Image.new("1", (14000, 14000), 1)
+    tiff = BytesIO()
+    small.save(tiff, format="TIFF", save_all=True, append_images=[huge], compression="group4")
+    huge.close()
+
+    response = client.post(
+        "/api/images-to-pdf",
+        files=[("images", ("bomba.tif", tiff.getvalue(), "image/tiff"))],
+    )
+
+    assert response.status_code == 400
+    assert "demasiado grande" in response.json()["detail"]
