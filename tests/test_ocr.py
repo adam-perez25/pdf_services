@@ -1,6 +1,8 @@
 from io import BytesIO
 import os
+from pathlib import Path
 import subprocess
+import time
 
 from PIL import Image, ImageDraw, ImageFont
 from pypdf import PdfReader, PdfWriter
@@ -202,3 +204,32 @@ def test_timeout_is_reported(client, ocr_ready, monkeypatch, documents_dir):
 def test_timeout_grows_with_pages_and_is_capped():
     assert main.ocr_timeout(1) < main.ocr_timeout(10)
     assert main.ocr_timeout(10_000) == main.OCR_TIMEOUT_MAX_SECONDS
+
+
+def test_long_ocr_survives_a_sweep(client, ocr_ready, monkeypatch, documents_dir):
+    # A fake ocrmypdf that runs "for hours": while it works, its files are
+    # older than the TTL and a sweep runs, but they must not be deleted.
+    seen = {}
+
+    def slow_run_tool(command, timeout, env=None):
+        source, output = Path(command[-2]), Path(command[-1])
+        output.write_bytes(source.read_bytes())
+        old = time.time() - main.DOCUMENT_TTL_SECONDS - 60
+        for path in documents_dir.iterdir():
+            os.utime(path, (old, old))
+        main.remove_expired_documents()
+        seen["left"] = sorted(path.name for path in documents_dir.iterdir())
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(main, "run_tool", slow_run_tool)
+
+    response = ocr(client, make_pdf(2))
+
+    assert response.status_code == 200
+    assert len(seen["left"]) == 2  # <job>.in.pdf and <job>.out.pdf survived
+    assert list(documents_dir.iterdir()) == []
+
+
+def test_ocr_limits_allow_big_scans():
+    assert main.OCR_MAX_PAGES >= 1000
+    assert main.ocr_timeout(500) > 60 * 60

@@ -1806,52 +1806,54 @@ def extract_text(
         input_path.unlink(missing_ok=True)
         text_path.unlink(missing_ok=True)
 
-    try:
-        with input_path.open("wb") as destination:
-            shutil.copyfileobj(file.file, destination)
+    # A long extraction must not lose its files to the periodic sweep.
+    with protect_from_sweeper(input_path, text_path):
+        try:
+            with input_path.open("wb") as destination:
+                shutil.copyfileobj(file.file, destination)
 
-        character_count = 0
-        has_text = False
-        # pdfium is not thread-safe, so the whole extraction holds the lock.
-        with PDFIUM_LOCK:
-            document = open_pdfium_checked(input_path)
-            try:
-                page_count = len(document)
-                if pages.strip():
-                    numbers = [
-                        number
-                        for start, end in parse_page_ranges(pages, page_count)
-                        for number in range(start, end + 1)
-                    ]
-                else:
-                    numbers = list(range(1, page_count + 1))
+            character_count = 0
+            has_text = False
+            # pdfium is not thread-safe, so the whole extraction holds the lock.
+            with PDFIUM_LOCK:
+                document = open_pdfium_checked(input_path)
+                try:
+                    page_count = len(document)
+                    if pages.strip():
+                        numbers = [
+                            number
+                            for start, end in parse_page_ranges(pages, page_count)
+                            for number in range(start, end + 1)
+                        ]
+                    else:
+                        numbers = list(range(1, page_count + 1))
 
-                with text_path.open("w", encoding="utf-8", newline="\n") as output:
-                    for position, number in enumerate(numbers):
-                        text = pdfium_page_text(document, number - 1).rstrip()
-                        character_count += len(text)
-                        has_text = has_text or bool(text.strip())
-                        if position:
-                            output.write("\n\f" if page_separator == "formfeed" else "\n\n")
-                        if page_separator == "header":
-                            output.write(f"--- Página {number} ---\n")
-                            if text:
-                                output.write("\n")
-                        output.write(text)
-                    output.write("\n")
-            finally:
-                document.close()
+                    with text_path.open("w", encoding="utf-8", newline="\n") as output:
+                        for position, number in enumerate(numbers):
+                            text = pdfium_page_text(document, number - 1).rstrip()
+                            character_count += len(text)
+                            has_text = has_text or bool(text.strip())
+                            if position:
+                                output.write("\n\f" if page_separator == "formfeed" else "\n\n")
+                            if page_separator == "header":
+                                output.write(f"--- Página {number} ---\n")
+                                if text:
+                                    output.write("\n")
+                            output.write(text)
+                        output.write("\n")
+                finally:
+                    document.close()
 
-        if not has_text:
-            raise HTTPException(status_code=400, detail=EMPTY_TEXT_MESSAGE)
-    except HTTPException:
-        remove_job_files()
-        raise
-    except Exception as error:
-        remove_job_files()
-        raise processing_error("No se pudo extraer el texto del PDF.", error) from error
-    finally:
-        file.file.close()
+            if not has_text:
+                raise HTTPException(status_code=400, detail=EMPTY_TEXT_MESSAGE)
+        except HTTPException:
+            remove_job_files()
+            raise
+        except Exception as error:
+            remove_job_files()
+            raise processing_error("No se pudo extraer el texto del PDF.", error) from error
+        finally:
+            file.file.close()
 
     input_path.unlink(missing_ok=True)
     filename = clean_text_output_name(output_name.strip() or Path(file.filename).stem, "texto")
@@ -2037,26 +2039,10 @@ def sign_document(
         path = get_document_path(document_id)
         boxes = parse_signature_placements(placements)
         image = load_signature_image(signature)
-        writer = None
         try:
-            reader = open_pdf_reader(path)
-            page_count = len(reader.pages)
-            by_page: dict[int, list[dict]] = {}
-            for box in boxes:
-                if box["page"] < 1 or box["page"] > page_count:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Las páginas deben estar entre 1 y {page_count}.",
-                    )
-                by_page.setdefault(box["page"], []).append(box)
-
-            writer = PdfWriter(clone_from=reader)
-            xobject = signature_xobject(writer, image)
-            for number, page_boxes in by_page.items():
-                page = writer.pages[number - 1]
-                page.merge_page(signature_overlay(page, xobject, page_boxes))
-            output = BytesIO()
-            writer.write(output)
+            # An open file, not the path: pypdf reads a path fully into memory.
+            with protect_from_sweeper(path), path.open("rb") as source:
+                output_path = sign_to_file(source, boxes, image)
         except FileNotFoundError:
             raise document_gone() from None
         except HTTPException:
@@ -2065,22 +2051,36 @@ def sign_document(
             raise processing_error("No se pudo firmar el PDF.", error) from error
         finally:
             image.close()
-            if writer is not None:
-                writer.close()
     finally:
         signature.file.close()
 
     # Like the organizer's save: the result is about to be downloaded, so the
     # stored copy goes. If the user keeps working, the page uploads it again.
     path.unlink(missing_ok=True)
+    return file_download(output_path, clean_output_name(output_name or "firmado.pdf"))
 
-    return Response(
-        content=output.getvalue(),
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="{clean_output_name(output_name or "firmado.pdf")}"',
-        },
-    )
+
+def sign_to_file(source, boxes: list[dict], image: Image.Image) -> Path:
+    reader = open_pdf_reader(source)
+    page_count = len(reader.pages)
+    by_page: dict[int, list[dict]] = {}
+    for box in boxes:
+        if box["page"] < 1 or box["page"] > page_count:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Las páginas deben estar entre 1 y {page_count}.",
+            )
+        by_page.setdefault(box["page"], []).append(box)
+
+    writer = PdfWriter(clone_from=reader)
+    try:
+        xobject = signature_xobject(writer, image)
+        for number, page_boxes in by_page.items():
+            page = writer.pages[number - 1]
+            page.merge_page(signature_overlay(page, xobject, page_boxes))
+        return write_pdf_to_file(writer)
+    finally:
+        writer.close()
 
 
 # OCR: make a scanned PDF searchable with ocrmypdf + Tesseract. ocrmypdf runs
@@ -2088,10 +2088,12 @@ def sign_document(
 # and Ghostscript worker it started.
 OCR_LANGUAGES = {"spa", "eng", "spa+eng"}
 OCR_JOBS = 2  # Tesseract workers per request, so one OCR does not take every core
-OCR_MAX_PAGES = 200
-OCR_TIMEOUT_BASE_SECONDS = 60
-OCR_TIMEOUT_PER_PAGE_SECONDS = 20
-OCR_TIMEOUT_MAX_SECONDS = 1800
+# Big scans are allowed: the limits are settings like the other ones, and the
+# cap (4 h by default) covers about 700 pages at the slow 20 s per page.
+OCR_MAX_PAGES = env_int("OCR_MAX_PAGES", 2000, 1, 100_000)
+OCR_TIMEOUT_BASE_SECONDS = env_int("OCR_TIMEOUT_SECONDS", 60, 10, 24 * 3600)
+OCR_TIMEOUT_PER_PAGE_SECONDS = env_int("OCR_SECONDS_PER_PAGE", 20, 0, 3600)
+OCR_TIMEOUT_MAX_SECONDS = env_int("OCR_MAX_TIMEOUT_SECONDS", 4 * 3600, 10, 7 * 24 * 3600)
 OCR_EXIT_ENCRYPTED = 8
 OCR_EXIT_MISSING_DEPENDENCY = 3
 OCR_EXIT_INVALID_CONFIG = 9  # e.g. a Tesseract language pack is missing
@@ -2171,48 +2173,50 @@ def ocr_pdf(
         input_path.unlink(missing_ok=True)
         output_path.unlink(missing_ok=True)
 
-    try:
-        with input_path.open("wb") as destination:
-            shutil.copyfileobj(file.file, destination)
-        with PDFIUM_LOCK:
-            document = open_pdfium_checked(input_path)
-            try:
-                page_count = len(document)
-            finally:
-                document.close()
-        if page_count > OCR_MAX_PAGES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"El OCR admite como máximo {OCR_MAX_PAGES} páginas por documento.",
-            )
-        # ocrmypdf keeps rasterized pages and intermediate PDFs in a scratch
-        # folder under TMPDIR. A timeout kills it before it can clean up, so it
-        # gets a private folder that is removed here whatever happens.
-        with tempfile.TemporaryDirectory(prefix="pdf-toolkit-ocr-") as scratch:
-            result = run_tool(
-                ocr_command(language, input_path, output_path),
-                timeout=ocr_timeout(page_count),
-                env={**os.environ, "TMPDIR": scratch, "TEMP": scratch, "TMP": scratch},
-            )
-        if result.returncode == OCR_EXIT_ENCRYPTED:
-            raise encrypted_pdf()
-        if result.returncode in (OCR_EXIT_MISSING_DEPENDENCY, OCR_EXIT_INVALID_CONFIG):
-            logger.warning("ocrmypdf cannot run (exit %s): %s", result.returncode, result.stderr.strip())
-            raise HTTPException(status_code=503, detail=OCR_MISSING_MESSAGE)
-        if result.returncode != 0 or not output_path.exists() or output_path.stat().st_size == 0:
-            detail = result.stderr.strip() or result.stdout.strip()
-            raise RuntimeError(f"ocrmypdf exit {result.returncode}: {detail}")
-    except subprocess.TimeoutExpired as error:
-        remove_job_files()
-        raise HTTPException(status_code=504, detail="El OCR tardó demasiado.") from error
-    except HTTPException:
-        remove_job_files()
-        raise
-    except Exception as error:
-        remove_job_files()
-        raise processing_error("No se pudo aplicar el OCR al PDF.", error) from error
-    finally:
-        file.file.close()
+    # OCR can run for hours on a big scan: keep the sweep away from its files.
+    with protect_from_sweeper(input_path, output_path):
+        try:
+            with input_path.open("wb") as destination:
+                shutil.copyfileobj(file.file, destination)
+            with PDFIUM_LOCK:
+                document = open_pdfium_checked(input_path)
+                try:
+                    page_count = len(document)
+                finally:
+                    document.close()
+            if page_count > OCR_MAX_PAGES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El OCR admite como máximo {OCR_MAX_PAGES} páginas por documento.",
+                )
+            # ocrmypdf keeps rasterized pages and intermediate PDFs in a scratch
+            # folder under TMPDIR. A timeout kills it before it can clean up, so it
+            # gets a private folder that is removed here whatever happens.
+            with tempfile.TemporaryDirectory(prefix="pdf-toolkit-ocr-") as scratch:
+                result = run_tool(
+                    ocr_command(language, input_path, output_path),
+                    timeout=ocr_timeout(page_count),
+                    env={**os.environ, "TMPDIR": scratch, "TEMP": scratch, "TMP": scratch},
+                )
+            if result.returncode == OCR_EXIT_ENCRYPTED:
+                raise encrypted_pdf()
+            if result.returncode in (OCR_EXIT_MISSING_DEPENDENCY, OCR_EXIT_INVALID_CONFIG):
+                logger.warning("ocrmypdf cannot run (exit %s): %s", result.returncode, result.stderr.strip())
+                raise HTTPException(status_code=503, detail=OCR_MISSING_MESSAGE)
+            if result.returncode != 0 or not output_path.exists() or output_path.stat().st_size == 0:
+                detail = result.stderr.strip() or result.stdout.strip()
+                raise RuntimeError(f"ocrmypdf exit {result.returncode}: {detail}")
+        except subprocess.TimeoutExpired as error:
+            remove_job_files()
+            raise HTTPException(status_code=504, detail="El OCR tardó demasiado.") from error
+        except HTTPException:
+            remove_job_files()
+            raise
+        except Exception as error:
+            remove_job_files()
+            raise processing_error("No se pudo aplicar el OCR al PDF.", error) from error
+        finally:
+            file.file.close()
 
     if output_name.strip():
         filename = clean_output_name(output_name)

@@ -222,6 +222,10 @@ variable falla.
 | `COMPRESSION_TIMEOUT_SECONDS` | 600 s | 10-86400 | Tiempo base de la compresión con Ghostscript. |
 | `COMPRESSION_SECONDS_PER_PAGE` | 2 s | 0-600 | Tiempo extra por página: el límite es base + páginas × este valor (20 páginas: 640 s; 1000 páginas: 2600 s). Si se supera responde `504`. |
 | `COMPRESSION_MAX_TIMEOUT_SECONDS` | 3600 s | 10-604800 | Tope del tiempo de compresión (nunca menor que el tiempo base). |
+| `OCR_MAX_PAGES` | 2000 | 1-100000 | Número máximo de páginas de un PDF para el OCR; si se supera responde `400`. |
+| `OCR_TIMEOUT_SECONDS` | 60 s | 10-86400 | Tiempo base del OCR. |
+| `OCR_SECONDS_PER_PAGE` | 20 s | 0-3600 | Tiempo extra del OCR por cada página. |
+| `OCR_MAX_TIMEOUT_SECONDS` | 14400 s | 10-604800 | Tope del tiempo del OCR (4 horas); si se supera responde `504`. |
 | `DOCUMENT_TTL_SECONDS` | 1800 s (30 min) | 60-604800 | Tiempo sin uso tras el que se borran los documentos de **Organizar páginas** y los archivos temporales que hayan quedado. |
 | `DOCUMENT_SWEEP_SECONDS` | 300 s (5 min) | 10-86400 | Frecuencia de esa limpieza. |
 
@@ -254,8 +258,6 @@ Otros valores fijos, definidos como constantes en `app/main.py`:
 | `SIGNATURE_MAX_PLACEMENTS` | 200 | Número máximo de firmas colocadas en una petición. |
 | `OCR_LANGUAGES` | `spa`, `eng`, `spa+eng` | Idiomas admitidos por el OCR. |
 | `OCR_JOBS` | 2 | Páginas que Tesseract procesa a la vez en cada petición de OCR. |
-| `OCR_MAX_PAGES` | 200 | Número máximo de páginas de un PDF para el OCR; si se supera responde `400`. |
-| `OCR_TIMEOUT_BASE_SECONDS` / `OCR_TIMEOUT_PER_PAGE_SECONDS` / `OCR_TIMEOUT_MAX_SECONDS` | 60 s / 20 s / 1800 s | Tiempo máximo del OCR: 60 s más 20 s por página, hasta 30 minutos; si se supera responde `504`. |
 
 Si una conversión, compresión u OCR supera su tiempo máximo, se termina el proceso
 externo junto con todos los procesos que haya iniciado. La limpieza periódica

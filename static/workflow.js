@@ -110,6 +110,28 @@ const MERGE_STEP = {
 
 const STEP_DEFINITIONS = [
     {
+        id: "ocr",
+        title: "Reconocer texto (OCR)",
+        endpoint: "/api/ocr",
+        working: "Reconociendo el texto... puede tardar varios segundos por página.",
+        failed: "No se pudo reconocer el texto.",
+        build(container) {
+            const language = selectControl([
+                ["spa", "Español"],
+                ["eng", "Inglés"],
+                ["spa+eng", "Español e inglés"],
+            ], "spa");
+            const hint = document.createElement("p");
+            hint.className = "workflow-step-note";
+            hint.textContent = "Para documentos escaneados: añade el texto para poder buscarlo y copiarlo. Ponlo antes de numerar o de añadir una marca de agua.";
+            container.append(field("Idioma", language), hint);
+            return (formData) => {
+                formData.append("language", language.value);
+                return "";
+            };
+        },
+    },
+    {
         id: "numbers",
         title: "Numerar páginas",
         endpoint: "/api/stamp",
@@ -277,19 +299,6 @@ const STEP_DEFINITIONS = [
             container.querySelectorAll('input[type="password"]').forEach((input) => { input.value = ""; });
         },
     },
-    // OCR (being added on another branch) would be one more entry, e.g.:
-    // {
-    //     id: "ocr",
-    //     title: "Reconocer texto (OCR)",
-    //     endpoint: "/api/ocr",
-    //     working: "Reconociendo el texto... puede tardar varios minutos.",
-    //     failed: "No se pudo reconocer el texto.",
-    //     build(container) {
-    //         const language = selectControl([["spa", "Español"], ["eng", "Inglés"]], "spa");
-    //         container.append(field("Idioma", language));
-    //         return (formData) => { formData.append("language", language.value); return ""; };
-    //     },
-    // },
 ];
 
 // ---- State ----
