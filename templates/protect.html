@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Proteger PDF | PDF Toolkit</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <main class="shell service-page">
+        <section class="intro">
+            <p class="eyebrow">SERVICIO 10 / PROTEGER</p>
+            <h1>Protege tus PDFs<br><em>con contraseña.</em></h1>
+            <p class="lede">Cifra un PDF con AES-256 para que solo se abra con contraseña, o quita la contraseña de un PDF que ya conoces.</p>
+        </section>
+
+        <nav class="service-back" aria-label="Navegación del servicio">
+            <a class="back-button" href="/">&#8592; Menu</a>
+        </nav>
+
+        <section class="workspace" aria-labelledby="protect-title">
+            <div class="view-heading">
+                <h2 id="protect-title">Documento PDF</h2>
+                <p class="view-lede">La contraseña solo se usa para procesar el archivo: no se guarda en el servidor.</p>
+            </div>
+
+            <form id="protect-form">
+                <label class="name-field">
+                    <span>Acción</span>
+                    <select id="protect-mode">
+                        <option value="protect" selected>Proteger: añadir una contraseña</option>
+                        <option value="unlock">Desbloquear: quitar la contraseña</option>
+                    </select>
+                </label>
+
+                <label class="dropzone" for="protect-input" id="protect-dropzone">
+                    <span class="drop-icon">+</span>
+                    <span><strong>Seleccionar PDF</strong><small id="protect-file-name">o arrástralo aquí</small></span>
+                    <input id="protect-input" type="file" accept="application/pdf,.pdf">
+                </label>
+
+                <label class="name-field">
+                    <span id="protect-password-label">Contraseña nueva</span>
+                    <input id="protect-password" type="password" maxlength="127" autocomplete="new-password">
+                </label>
+
+                <label id="protect-confirm-field" class="name-field">
+                    <span>Repite la contraseña</span>
+                    <input id="protect-confirm" type="password" maxlength="127" autocomplete="new-password">
+                </label>
+
+                <label class="name-field">
+                    <span>Nombre del PDF</span>
+                    <input id="protect-output-name" type="text" value="protegido.pdf" maxlength="120" autocomplete="off">
+                </label>
+                <button class="primary-button" type="submit">
+                    <span id="protect-submit-label">Proteger y descargar</span>
+                    <span aria-hidden="true">&#8594;</span>
+                </button>
+            </form>
+            <p id="protect-status" class="status" role="status"></p>
+        </section>
+    </main>
+    <script src="/static/common.js"></script>
+    <script src="/static/protect.js"></script>
+</body>
+</html>

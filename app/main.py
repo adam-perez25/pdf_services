@@ -133,6 +133,11 @@ async def pdf_to_images_page():
     return render_page("pdf-to-images.html")
 
 
+@app.get("/protect", response_class=HTMLResponse)
+async def protect_page():
+    return render_page("protect.html")
+
+
 @app.get("/health")
 def health():
     # Used by the Docker HEALTHCHECK. The service is unhealthy only if it cannot
@@ -1098,3 +1103,103 @@ def compress_pdf(
         },
         background=BackgroundTask(remove_job_files),
     )
+
+
+# Protect / unlock. Passwords only live in memory for the request: they are
+# never logged, stored or echoed back in error messages.
+# AES-256 (PDF 2.0, revision 6) passwords are limited to 127 UTF-8 bytes.
+MAX_PASSWORD_BYTES = 127
+
+
+def check_password(password: str) -> None:
+    if not password:
+        raise HTTPException(status_code=400, detail="Escribe una contraseña.")
+    if len(password.encode("utf-8")) > MAX_PASSWORD_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"La contraseña no puede superar {MAX_PASSWORD_BYTES} bytes.",
+        )
+
+
+def pdf_attachment(content: bytes, filename: str) -> Response:
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/protect")
+def protect_pdf(
+    file: UploadFile = File(...),
+    password: str = Form(""),
+    output_name: str = Form("protegido.pdf"),
+):
+    try:
+        if not file.filename or not file.filename.lower().endswith(".pdf"):
+            raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+        check_password(password)
+        try:
+            reader = PdfReader(file.file)
+            if reader.is_encrypted:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Este PDF ya está protegido con contraseña. Desbloquéalo primero.",
+                )
+            writer = PdfWriter(clone_from=reader)
+            writer.encrypt(user_password=password, owner_password=password, algorithm="AES-256")
+            output = BytesIO()
+            writer.write(output)
+            writer.close()
+        except HTTPException:
+            raise
+        except Exception as error:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No se pudo proteger el PDF: {error}",
+            ) from error
+    finally:
+        file.file.close()
+
+    return pdf_attachment(output.getvalue(), clean_output_name(output_name))
+
+
+@app.post("/api/unlock")
+def unlock_pdf(
+    file: UploadFile = File(...),
+    password: str = Form(""),
+    output_name: str = Form("desbloqueado.pdf"),
+):
+    try:
+        if not file.filename or not file.filename.lower().endswith(".pdf"):
+            raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+        # An empty password is allowed here: PDFs that only have an owner
+        # password (restrictions, no password to open) decrypt with "".
+        if password:
+            check_password(password)
+        try:
+            reader = PdfReader(file.file)
+            if not reader.is_encrypted:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Este PDF no está protegido con contraseña.",
+                )
+            if not reader.decrypt(password):
+                if not password:
+                    raise HTTPException(status_code=400, detail="Escribe la contraseña del PDF.")
+                raise HTTPException(status_code=400, detail="Contraseña incorrecta")
+            writer = PdfWriter(clone_from=reader)
+            output = BytesIO()
+            writer.write(output)
+            writer.close()
+        except HTTPException:
+            raise
+        except Exception as error:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No se pudo desbloquear el PDF: {error}",
+            ) from error
+    finally:
+        file.file.close()
+
+    return pdf_attachment(output.getvalue(), clean_output_name(output_name))
