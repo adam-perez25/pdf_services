@@ -1696,6 +1696,11 @@ def load_signature_image(file: UploadFile) -> Image.Image:
     except (UnidentifiedImageError, OSError, SyntaxError, ValueError, Image.DecompressionBombError) as error:
         raise invalid from error
     signature.thumbnail((SIGNATURE_MAX_SIDE, SIGNATURE_MAX_SIDE))
+    # A fully transparent or plain white image would "sign" with nothing
+    # visible and still use up the uploaded document.
+    on_white = Image.alpha_composite(Image.new("RGBA", signature.size, "white"), signature)
+    if on_white.convert("L").getextrema()[0] > 245:
+        raise HTTPException(status_code=400, detail="La imagen de la firma está vacía.")
     return signature
 
 
@@ -1726,9 +1731,16 @@ def parse_signature_placements(value: str) -> list[dict]:
         box = {}
         for key in ("x", "y", "width", "height"):
             number = item.get(key)
-            if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(number):
+            if isinstance(number, bool) or not isinstance(number, (int, float)):
                 raise invalid
-            box[key] = float(number)
+            try:
+                # float() of a JSON integer with hundreds of digits overflows.
+                number = float(number)
+            except OverflowError:
+                raise invalid from None
+            if not math.isfinite(number):
+                raise invalid
+            box[key] = number
         x, y, width, height = box["x"], box["y"], box["width"], box["height"]
         if (
             width <= 0 or height <= 0

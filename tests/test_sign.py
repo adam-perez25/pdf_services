@@ -203,6 +203,8 @@ def test_large_signature_is_scaled_down(client):
         [{"page": 1, **BOX, "x": "0.1"}],
         [{"page": 1, **BOX, "x": None}],
         ["page"],
+        # float() of a 400-digit integer overflows; it must be a 400, not a 500.
+        '[{"page": 1, "x": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", "y": 0, "width": 0.1, "height": 0.1}]',
     ],
 )
 def test_bad_placements_json(client, documents_dir, placements):
@@ -302,3 +304,19 @@ def test_processing_error_does_not_leak(client, documents_dir):
     response = sign(client, document_id, [{"page": 1, **BOX}])
     assert response.status_code == 400
     assert response.json()["detail"] == "No se pudo firmar el PDF."
+
+
+
+@pytest.mark.parametrize(
+    "signature",
+    [solid_png(color=(0, 0, 0, 0)), solid_png(color=(255, 255, 255, 255))],
+    ids=["transparent", "white"],
+)
+def test_blank_signature_is_rejected(client, documents_dir, signature):
+    document_id = upload(client, blank_pdf([0]))
+
+    response = sign(client, document_id, [{"page": 1, **BOX}], signature=signature)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "La imagen de la firma está vacía."
+    assert len(list(documents_dir.iterdir())) == 1
