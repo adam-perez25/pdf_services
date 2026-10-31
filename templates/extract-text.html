@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Extraer texto | PDF Toolkit</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <main class="shell service-page">
+        <section class="intro">
+            <p class="eyebrow">SERVICIO 14 / EXTRAER TEXTO</p>
+            <h1>Saca el texto<br><em>de tus PDFs.</em></h1>
+            <p class="lede">Descarga el texto de un PDF como archivo TXT (UTF-8), de todas las páginas o solo de las que elijas.</p>
+        </section>
+
+        <nav class="service-back" aria-label="Navegación del servicio">
+            <a class="back-button" href="/">&#8592; Menu</a>
+        </nav>
+
+        <section class="workspace" aria-labelledby="extract-text-title">
+            <div class="view-heading">
+                <h2 id="extract-text-title">Documento PDF</h2>
+                <p class="view-lede">Solo se extrae el texto que ya contiene el PDF. Los documentos escaneados son imágenes: pásalos antes por la herramienta OCR.</p>
+            </div>
+
+            <form id="extract-text-form">
+                <label class="dropzone" for="extract-text-input" id="extract-text-dropzone">
+                    <span class="drop-icon">+</span>
+                    <span><strong>Seleccionar PDF</strong><small id="extract-text-file-name">o arrástralo aquí</small></span>
+                    <input id="extract-text-input" type="file" accept="application/pdf,.pdf">
+                </label>
+
+                <label class="name-field">
+                    <span>Páginas (vacío = todas; por ejemplo 1-3, 5)</span>
+                    <input id="extract-text-pages" type="text" maxlength="200" autocomplete="off" placeholder="Todas">
+                </label>
+
+                <label class="name-field">
+                    <span>Separador entre páginas</span>
+                    <select id="extract-text-separator">
+                        <option value="header" selected>Encabezado «--- Página N ---»</option>
+                        <option value="formfeed">Salto de página (form feed)</option>
+                        <option value="none">Ninguno</option>
+                    </select>
+                </label>
+
+                <label class="name-field">
+                    <span>Nombre del archivo TXT</span>
+                    <input id="extract-text-output-name" type="text" value="texto.txt" maxlength="120" autocomplete="off">
+                </label>
+                <button class="primary-button" type="submit">
+                    <span>Extraer y descargar</span>
+                    <span aria-hidden="true">&#8594;</span>
+                </button>
+            </form>
+            <p id="extract-text-status" class="status" role="status"></p>
+
+            <label class="name-field text-preview" id="extract-text-preview-field" hidden>
+                <span id="extract-text-preview-label">Vista previa</span>
+                <textarea id="extract-text-preview" rows="12" readonly></textarea>
+            </label>
+        </section>
+    </main>
+    <script src="/static/common.js"></script>
+    <script src="/static/extract-text.js"></script>
+</body>
+</html>

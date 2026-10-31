@@ -50,6 +50,11 @@ mismo servidor y no requiere un frontend independiente.
   palabras clave de un PDF, o elimina todos sus metadatos (incluido el bloque
   XMP) antes de compartirlo, para no revelar quién lo creó, con qué programa ni
   cuándo.
+- **Extraer texto:** descarga el texto de un PDF como archivo `.txt` (UTF-8), de
+  todas las páginas o de un rango (`1-3, 5`), con un encabezado
+  `--- Página N ---`, un salto de página o nada entre páginas, y muestra una
+  vista previa con el número de caracteres y páginas. Los PDF escaneados no
+  tienen texto: hay que pasarlos antes por OCR.
 - **Organizar páginas:** muestra una vista previa de cada página y permite
   girarlas, eliminarlas y reordenarlas (con los botones o arrastrándolas, también
   en pantallas táctiles manteniendo pulsada la página) antes de descargar el PDF
@@ -201,7 +206,7 @@ de Docker.
 ## Interfaz web
 
 Cada herramienta tiene su propia página: `/` (inicio), `/merge`, `/split`,
-`/pages`, `/compress`, `/metadata`, `/protect`, `/images`, `/pdf-to-images`, `/stamp`, `/word`,
+`/pages`, `/compress`, `/metadata`, `/extract-text`, `/protect`, `/images`, `/pdf-to-images`, `/stamp`, `/word`,
 `/excel` y `/powerpoint`.
 
 La interfaz tiene modo oscuro automático: sigue la preferencia de tema claro u
@@ -229,6 +234,7 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 | `POST` | `/api/stamp` | Numera las páginas (`mode=numbers`, por defecto) o añade una marca de agua (`mode=watermark`). Números: `position` (`bottom-center` por defecto, `bottom-left`, `bottom-right`, `top-center`, `top-left`, `top-right`), `number_format` (`n` → `1`, `n-of-total` → `1 / N`, `page-n-of-total` → `Página 1 de N`; N es el último número), `start_number` (0-100000, por defecto 1) y `font_size` (6-72, por defecto 12). Marca de agua: `text` (obligatorio, hasta 100 caracteres), `font_size` (8-200, por defecto 60), `opacity` (0.1-1, por defecto 0.3) y `rotation` (`45` por defecto o `0`). `output_name` es opcional (`<nombre>-numerado.pdf` / `<nombre>-marca-de-agua.pdf`). |
 | `POST` | `/api/metadata/read` | Devuelve en JSON los metadatos de un PDF (`title`, `author`, `subject`, `keywords`, `creator`, `producer`, `creation_date`, `modification_date`; `null` si faltan) y su número de páginas (`pages`). |
 | `POST` | `/api/metadata` | Escribe `title`, `author`, `subject` y `keywords` (máximo 500 caracteres cada uno; un campo vacío o ausente se elimina), quita el bloque XMP y borra las entradas no estándar que añaden otros programas (se conservan creador, productor, fechas y `/Trapped`). Con `remove_all=true` elimina todos los metadatos. La descarga se llama `<nombre>-metadatos.pdf` salvo que se indique `output_name`. |
+| `POST` | `/api/extract-text` | Extrae el texto de un PDF y lo devuelve como `text/plain; charset=utf-8` (`<nombre>.txt`, o `output_name` con extensión `.txt`). `pages` admite rangos (`1-3, 5`; vacío = todas), `page_separator` es `header` (por defecto, línea `--- Página N ---`), `formfeed` o `none`. Las cabeceras `X-Page-Count` y `X-Character-Count` indican páginas y caracteres extraídos. Responde `400` si el PDF no contiene texto (probablemente escaneado; usar OCR antes). |
 | `POST` | `/api/documents` | Sube un PDF una sola vez y devuelve su `id` y número de páginas. |
 | `GET` | `/api/documents/{id}/pages/{n}` | Devuelve la página `n` como JPEG; `width` controla el tamaño (100-2000 px). |
 | `POST` | `/api/documents/{id}/edit` | Genera el PDF editado a partir de `pages` sin volver a subir el archivo. |

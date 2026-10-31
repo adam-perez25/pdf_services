@@ -20,6 +20,7 @@ paths:
   | protect | protect.js (Proteger/Desbloquear mode select; password only in the multipart body) |
   | stamp | stamp.js (mode select toggles `#stamp-numbers-options` / `#stamp-watermark-options`) |
   | metadata | metadata.js (reads `/api/metadata/read` on file choice to prefill) |
+  | extract-text | extract-text.js (downloads the .txt, then fills the read-only `#extract-text-preview` textarea via `.value` with the first 2000 chars; counts from `X-Page-Count` / `X-Character-Count`) |
 
 - `office.js` is configured by data attributes on `#office-form`: `data-endpoint`, `data-extensions` (comma-separated, no dots), `data-default-name`, `data-missing-file`. Element ids are the same on all three pages (`office-input`, `office-dropzone`, `office-file-name`, `office-output-name`, `office-status`). A new Office-like tool is just a template with different data attributes.
 - `common.js` helpers:
