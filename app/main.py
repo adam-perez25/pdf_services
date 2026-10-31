@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager, contextmanager
+import importlib.util
 from io import BytesIO
 import json
 import logging
@@ -10,6 +11,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -249,6 +251,7 @@ def health():
             "storage": storage_ok,
             "libreoffice": find_soffice() is not None,
             "ghostscript": find_ghostscript() is not None,
+            "ocr": ocr_available(),
         },
     )
 
@@ -261,7 +264,7 @@ def find_ghostscript() -> str | None:
     return shutil.which("gs") or shutil.which("gswin64c") or shutil.which("gswin32c")
 
 
-def run_tool(command: list[str], timeout: float) -> subprocess.CompletedProcess:
+def run_tool(command: list[str], timeout: float, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     """Run an external tool, and on timeout kill it with every process it started.
 
     soffice is only a launcher: the conversion runs in a soffice.bin child, which
@@ -274,6 +277,7 @@ def run_tool(command: list[str], timeout: float) -> subprocess.CompletedProcess:
         stderr=subprocess.PIPE,
         text=True,
         start_new_session=os.name == "posix",
+        env=env,
     )
     try:
         stdout, stderr = process.communicate(timeout=timeout)
@@ -2076,4 +2080,147 @@ def sign_document(
         headers={
             "Content-Disposition": f'attachment; filename="{clean_output_name(output_name or "firmado.pdf")}"',
         },
+    )
+
+
+# OCR: make a scanned PDF searchable with ocrmypdf + Tesseract. ocrmypdf runs
+# as a subprocess through run_tool, so a timeout kills it and every Tesseract
+# and Ghostscript worker it started.
+OCR_LANGUAGES = {"spa", "eng", "spa+eng"}
+OCR_JOBS = 2  # Tesseract workers per request, so one OCR does not take every core
+OCR_MAX_PAGES = 200
+OCR_TIMEOUT_BASE_SECONDS = 60
+OCR_TIMEOUT_PER_PAGE_SECONDS = 20
+OCR_TIMEOUT_MAX_SECONDS = 1800
+OCR_EXIT_ENCRYPTED = 8
+OCR_EXIT_MISSING_DEPENDENCY = 3
+OCR_EXIT_INVALID_CONFIG = 9  # e.g. a Tesseract language pack is missing
+OCR_MISSING_MESSAGE = "El OCR no está disponible: falta ocrmypdf o Tesseract en el servidor."
+
+
+def find_tesseract() -> str | None:
+    return shutil.which("tesseract") or shutil.which("tesseract.exe")
+
+
+def ocrmypdf_installed() -> bool:
+    return importlib.util.find_spec("ocrmypdf") is not None
+
+
+def ocr_available() -> bool:
+    return find_tesseract() is not None and ocrmypdf_installed()
+
+
+def ocr_timeout(page_count: int) -> float:
+    return min(OCR_TIMEOUT_BASE_SECONDS + OCR_TIMEOUT_PER_PAGE_SECONDS * page_count, OCR_TIMEOUT_MAX_SECONDS)
+
+
+def ocr_command(language: str, input_path: Path, output_path: Path) -> list[str]:
+    return [
+        sys.executable,
+        "-m",
+        "ocrmypdf",
+        # Pages that already have text are copied as they are, so a
+        # half-scanned document (or one that needs no OCR) does not fail.
+        "--skip-text",
+        "-l",
+        language,
+        # A plain PDF: PDF/A conversion is slower and changes more.
+        "--output-type",
+        "pdf",
+        "--optimize",
+        "0",
+        "--jobs",
+        str(OCR_JOBS),
+        "--quiet",
+        str(input_path),
+        str(output_path),
+    ]
+
+
+@app.get("/ocr", response_class=HTMLResponse)
+async def ocr_page():
+    return render_page("ocr.html")
+
+
+@app.post("/api/ocr")
+def ocr_pdf(
+    file: UploadFile = File(...),
+    language: str = Form("spa"),
+    output_name: str = Form(""),
+):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        file.file.close()
+        raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
+    if language not in OCR_LANGUAGES:
+        file.file.close()
+        raise HTTPException(status_code=400, detail="El idioma del OCR no es válido.")
+    check_upload_sizes([file])
+
+    if not ocr_available():
+        file.file.close()
+        raise HTTPException(status_code=503, detail=OCR_MISSING_MESSAGE)
+
+    # Same layout as Compress: both files live in the documents folder, so the
+    # sweep removes them if the server stops halfway.
+    DOCUMENTS_DIR.mkdir(exist_ok=True)
+    job_id = uuid.uuid4().hex
+    input_path = DOCUMENTS_DIR / f"{job_id}.in.pdf"
+    output_path = DOCUMENTS_DIR / f"{job_id}.out.pdf"
+
+    def remove_job_files():
+        input_path.unlink(missing_ok=True)
+        output_path.unlink(missing_ok=True)
+
+    try:
+        with input_path.open("wb") as destination:
+            shutil.copyfileobj(file.file, destination)
+        with PDFIUM_LOCK:
+            document = open_pdfium_checked(input_path)
+            try:
+                page_count = len(document)
+            finally:
+                document.close()
+        if page_count > OCR_MAX_PAGES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"El OCR admite como máximo {OCR_MAX_PAGES} páginas por documento.",
+            )
+        # ocrmypdf keeps rasterized pages and intermediate PDFs in a scratch
+        # folder under TMPDIR. A timeout kills it before it can clean up, so it
+        # gets a private folder that is removed here whatever happens.
+        with tempfile.TemporaryDirectory(prefix="pdf-toolkit-ocr-") as scratch:
+            result = run_tool(
+                ocr_command(language, input_path, output_path),
+                timeout=ocr_timeout(page_count),
+                env={**os.environ, "TMPDIR": scratch, "TEMP": scratch, "TMP": scratch},
+            )
+        if result.returncode == OCR_EXIT_ENCRYPTED:
+            raise encrypted_pdf()
+        if result.returncode in (OCR_EXIT_MISSING_DEPENDENCY, OCR_EXIT_INVALID_CONFIG):
+            logger.warning("ocrmypdf cannot run (exit %s): %s", result.returncode, result.stderr.strip())
+            raise HTTPException(status_code=503, detail=OCR_MISSING_MESSAGE)
+        if result.returncode != 0 or not output_path.exists() or output_path.stat().st_size == 0:
+            detail = result.stderr.strip() or result.stdout.strip()
+            raise RuntimeError(f"ocrmypdf exit {result.returncode}: {detail}")
+    except subprocess.TimeoutExpired as error:
+        remove_job_files()
+        raise HTTPException(status_code=504, detail="El OCR tardó demasiado.") from error
+    except HTTPException:
+        remove_job_files()
+        raise
+    except Exception as error:
+        remove_job_files()
+        raise processing_error("No se pudo aplicar el OCR al PDF.", error) from error
+    finally:
+        file.file.close()
+
+    if output_name.strip():
+        filename = clean_output_name(output_name)
+    else:
+        filename = clean_output_name(clean_base_name(Path(file.filename).stem, "documento") + "-ocr")
+    return FileResponse(
+        output_path,
+        media_type="application/pdf",
+        filename=filename,
+        background=BackgroundTask(remove_job_files),
     )

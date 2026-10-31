@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>OCR | PDF Toolkit</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <main class="shell service-page">
+        <section class="intro">
+            <p class="eyebrow">SERVICIO 13 / OCR</p>
+            <h1>Haz buscable<br><em>un PDF escaneado.</em></h1>
+            <p class="lede">Reconoce el texto de las páginas escaneadas y lo añade como una capa invisible: podrás buscar, seleccionar y copiar el texto sin que cambie el aspecto del documento.</p>
+        </section>
+
+        <nav class="service-back" aria-label="Navegación del servicio">
+            <a class="back-button" href="/">&#8592; Menu</a>
+        </nav>
+
+        <section class="workspace" aria-labelledby="ocr-title">
+            <div class="view-heading">
+                <h2 id="ocr-title">Documento escaneado</h2>
+                <p class="view-lede">Pensado para documentos escaneados o fotografiados. El reconocimiento se hace con Tesseract y tarda varios segundos por página; las páginas que ya tienen texto se dejan como están.</p>
+            </div>
+
+            <form id="ocr-form">
+                <label class="dropzone" for="ocr-input" id="ocr-dropzone">
+                    <span class="drop-icon">+</span>
+                    <span><strong>Seleccionar PDF</strong><small id="ocr-file-name">o arrástralo aquí</small></span>
+                    <input id="ocr-input" type="file" accept="application/pdf,.pdf">
+                </label>
+
+                <label class="name-field">
+                    <span>Idioma del documento</span>
+                    <select id="ocr-language">
+                        <option value="spa" selected>Español</option>
+                        <option value="eng">Inglés</option>
+                        <option value="spa+eng">Español e inglés</option>
+                    </select>
+                </label>
+
+                <label class="name-field">
+                    <span>Nombre del PDF</span>
+                    <input id="ocr-output-name" type="text" value="documento-ocr.pdf" maxlength="120" autocomplete="off">
+                </label>
+                <button class="primary-button" type="submit">
+                    <span>Aplicar OCR y descargar</span>
+                    <span aria-hidden="true">&#8594;</span>
+                </button>
+            </form>
+            <p id="ocr-status" class="status" role="status"></p>
+        </section>
+    </main>
+    <script src="/static/common.js"></script>
+    <script src="/static/ocr.js"></script>
+</body>
+</html>

@@ -46,3 +46,14 @@ def test_health_reports_missing_ghostscript(client, monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["ghostscript"] is False
+
+
+def test_health_reports_ocr(client, monkeypatch):
+    assert isinstance(client.get("/health").json()["ocr"], bool)
+
+    monkeypatch.setattr(main, "find_tesseract", lambda: None)
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json()["ocr"] is False

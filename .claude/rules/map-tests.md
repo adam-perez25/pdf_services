@@ -6,7 +6,7 @@ paths:
 
 - Run `python -m pytest` (pytest.ini: testpaths=tests, pythonpath=.). Tests import `app.main as main`.
 - Files:
-  - one per tool: test_compress, test_metadata, test_images_to_pdf, test_office_to_pdf, test_page_organizer, test_pdf_to_images, test_protect, test_split_zip, test_extract_text (builds real-text PDFs with a Helvetica/WinAnsi content stream via `text_pdf`), test_stamp (renders with pypdfium2 to check where the text lands on rotated pages), test_sign (uploads via /api/documents then signs; renders under `PDFIUM_LOCK` to check ink inside/outside the box, rotated pages, cropbox origin, transparent PNG, validation, 410);
+  - one per tool: test_compress, test_metadata, test_images_to_pdf, test_office_to_pdf, test_page_organizer, test_pdf_to_images, test_protect, test_split_zip, test_ocr, test_extract_text (builds real-text PDFs with a Helvetica/WinAnsi content stream via `text_pdf`), test_stamp (renders with pypdfium2 to check where the text lands on rotated pages), test_sign (uploads via /api/documents then signs; renders under `PDFIUM_LOCK` to check ink inside/outside the box, rotated pages, cropbox origin, transparent PNG, validation, 410);
   - test_pdf_tools covers merge, split, pdf-info and edit-pages;
   - test_workflow covers the `/workflow` page, checks that every `"/api/..."` string in `static/workflow.js` (ignoring `//` lines) is a registered POST route, and runs the merge -> stamp -> metadata -> protect chain the page performs (plus a compress chain behind `needs_ghostscript`);
   - test_health, test_run_tool and test_security_headers cover cross-cutting behaviour;
@@ -20,6 +20,7 @@ paths:
 - Startup behaviour is tested with `with TestClient(main.app):` (`test_startup_purges_leftovers` in test_page_organizer.py).
 - Skip markers:
   - `needs_ghostscript` (test_compress.py:10) and test_images_to_pdf.py:72 skip when Ghostscript is missing.
+  - `needs_tesseract` (test_ocr.py) skips the real OCR runs when ocrmypdf or Tesseract is missing; the validation, exit-code and timeout tests monkeypatch `ocr_available` / `run_tool` and always run.
   - `needs_libreoffice` (test_office_to_pdf.py:11, test_pdf_tools.py:120) skips when LibreOffice is missing.
   - test_run_tool.py:19 needs Linux `/proc`.
 - Office inputs are generated with openpyxl and python-pptx (dev deps); no binary fixtures are checked in.
