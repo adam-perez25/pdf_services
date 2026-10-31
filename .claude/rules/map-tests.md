@@ -9,6 +9,7 @@ paths:
   - one per tool: test_compress, test_metadata, test_images_to_pdf, test_office_to_pdf, test_page_organizer, test_pdf_to_images, test_protect, test_split_zip, test_stamp (renders with pypdfium2 to check where the text lands on rotated pages);
   - test_pdf_tools covers merge, split, pdf-info and edit-pages;
   - test_health, test_run_tool and test_security_headers cover cross-cutting behaviour;
+  - test_large_pdfs builds a 1500-page PDF (blank pages, page n is 200+n pt wide) once per module and runs it through merge, split-zip, organizer, stamp, metadata, protect/unlock; it also covers the sweeper skipping in-flight job files (fake `run_tool` / `write_pdf_to_file` that sweep mid-job), `compression_timeout`, `env_int`, settings imported in a subprocess with env vars, and limits read at request time (~13 s total);
   - test_hardening covers upload limits (413, via monkeypatched `MAX_UPLOAD_MB`), non-leaking error details and password-protected PDFs (built with `PdfWriter.encrypt`).
 - `tests/conftest.py`:
   - `documents_dir` monkeypatches `main.DOCUMENTS_DIR` to `tmp_path/"documents"`, so tests can assert that it is left empty.
