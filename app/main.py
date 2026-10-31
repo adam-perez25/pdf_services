@@ -1120,7 +1120,10 @@ def unlock_pdf(
     try:
         if not file.filename or not file.filename.lower().endswith(".pdf"):
             raise HTTPException(status_code=400, detail="El archivo debe ser un PDF.")
-        check_password(password)
+        # An empty password is allowed here: PDFs that only have an owner
+        # password (restrictions, no password to open) decrypt with "".
+        if password:
+            check_password(password)
         try:
             reader = PdfReader(file.file)
             if not reader.is_encrypted:
@@ -1129,6 +1132,8 @@ def unlock_pdf(
                     detail="Este PDF no está protegido con contraseña.",
                 )
             if not reader.decrypt(password):
+                if not password:
+                    raise HTTPException(status_code=400, detail="Escribe la contraseña del PDF.")
                 raise HTTPException(status_code=400, detail="Contraseña incorrecta")
             writer = PdfWriter(clone_from=reader)
             output = BytesIO()

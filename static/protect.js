@@ -84,7 +84,9 @@ protectForm.addEventListener("submit", async (event) => {
     }
 
     const password = protectPassword.value;
-    if (!password) {
+    // Unlocking may go without a password: PDFs that only restrict printing
+    // or copying (owner password) open with an empty one.
+    if (!password && protectMode.value === "protect") {
         setStatus("Escribe una contraseña.", true);
         protectPassword.focus();
         return;

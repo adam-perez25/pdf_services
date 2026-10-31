@@ -1,6 +1,6 @@
 from io import BytesIO
 
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
 
 from conftest import make_pdf
 
@@ -83,7 +83,24 @@ def test_empty_password_is_rejected(client):
     assert response.json()["detail"] == "Escribe una contraseña."
 
     protected = protect(client, make_pdf(1)).content
-    assert unlock(client, protected, password="").status_code == 400
+    response = unlock(client, protected, password="")
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Escribe la contraseña del PDF."
+
+
+def test_unlock_owner_only_pdf_without_password(client):
+    # Restrictions only: empty user password, so it opens without one.
+    writer = PdfWriter(clone_from=PdfReader(BytesIO(make_pdf(2))))
+    writer.encrypt(user_password="", owner_password="dueño", algorithm="AES-256")
+    restricted = BytesIO()
+    writer.write(restricted)
+
+    response = unlock(client, restricted.getvalue(), password="")
+
+    assert response.status_code == 200
+    reader = PdfReader(BytesIO(response.content))
+    assert not reader.is_encrypted
+    assert len(reader.pages) == 2
 
 
 def test_too_long_password_is_rejected(client):
