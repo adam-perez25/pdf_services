@@ -1,6 +1,6 @@
 # PDFService
 
-Web PDF toolkit (FastAPI + Uvicorn) run with Docker Compose. Merge, split, compress, convert images/Office files to PDF, PDF to images, page editor. The UI and README are in Spanish.
+Web PDF toolkit (FastAPI + Uvicorn) run with Docker Compose. Merge, split, compress, convert images/Office files to PDF, PDF to images, page editor, page numbers / watermark. The UI and README are in Spanish.
 
 - Code: `app/main.py`. Templates in `templates/`, frontend assets in `static/`.
 - Tests: `python -m pytest` (config in `pytest.ini`, tests in `tests/`, one file per tool). Dev deps in `requirements-dev.txt`.
@@ -31,7 +31,7 @@ Spanish-language web PDF toolkit, `FastAPI(title="Unir PDF")` (`app/main.py:46`)
 - Page routes `GET /`, `/merge`, `/split`, ... (main.py:83-130) -> `render_page`.
 - Tool request: `postForm()` in common.js -> multipart POST `/api/*`. Handler is a sync `def`, so it runs in a worker thread (main.py:224). It validates the extension and options, processes the file, and returns an attachment named by `clean_output_name` (216). `file.file.close()` runs in `finally`.
 - Error codes: 400 bad input, 503 LibreOffice/Ghostscript missing, 504 timeout, 410 expired organizer document.
-- In memory: merge (226), pdf-info (271), split (288), images-to-pdf (693), edit-pages (646).
+- In memory: merge (226), pdf-info (271), split (288), images-to-pdf (693), edit-pages (646), stamp (end of file).
 - Temp files in DOCUMENTS_DIR, removed with a `BackgroundTask`: split-zip (366), pdf-to-images (754), compress (960).
 - Office: `convert_office_to_pdf` (885) uses a `TemporaryDirectory` and a throwaway LibreOffice profile.
 
@@ -46,6 +46,7 @@ Spanish-language web PDF toolkit, `FastAPI(title="Unir PDF")` (`app/main.py:46`)
   - Endpoints at main.py:548-673.
 - Images: `ALLOWED_IMAGE_FORMATS` (681), `a4_resolution`, `IMAGE_DPI_CHOICES` / `MAX_IMAGE_PIXELS` (748-751).
 - Compress: `COMPRESSION_LEVELS` (951) maps strong/recommended/high to Ghostscript `/screen` / `/ebook` / `/printer`. pdfium validates the file first, and Ghostscript runs with `-dSAFER`.
+- Stamp (page numbers / watermark): contiguous block at the end of main.py. `GET /stamp` and `POST /api/stamp` (`mode=numbers|watermark`). `STAMP_*` constants validate options (numeric fields arrive as strings so bad values give 400, not 422). `visible_page_box` returns a cm matrix that maps upright displayed coordinates to page space for /Rotate 0/90/180/270 (uses the cropbox). `stamp_overlay` builds an in-memory overlay page (standard Helvetica, WinAnsi, hex strings; ExtGState for opacity) merged with `page.merge_page`. `helvetica_width` uses an embedded AFM width table for centering. Watermark text must encode to cp1252; it shrinks to fit the width/diagonal. No new dependencies.
 - Health: `/health` (133) returns 503 only if it cannot write to DOCUMENTS_DIR. It reports `libreoffice` and `ghostscript` as booleans.
 
 ### Data and state
