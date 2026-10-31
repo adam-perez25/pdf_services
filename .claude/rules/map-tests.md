@@ -8,6 +8,7 @@ paths:
 - Files:
   - one per tool: test_compress, test_metadata, test_images_to_pdf, test_office_to_pdf, test_page_organizer, test_pdf_to_images, test_protect, test_split_zip, test_stamp (renders with pypdfium2 to check where the text lands on rotated pages);
   - test_pdf_tools covers merge, split, pdf-info and edit-pages;
+  - test_workflow covers the `/workflow` page, checks that every `"/api/..."` string in `static/workflow.js` (ignoring `//` lines) is a registered POST route, and runs the merge -> stamp -> metadata -> protect chain the page performs (plus a compress chain behind `needs_ghostscript`);
   - test_health, test_run_tool and test_security_headers cover cross-cutting behaviour;
   - test_hardening covers upload limits (413, via monkeypatched `MAX_UPLOAD_MB`), non-leaking error details and password-protected PDFs (built with `PdfWriter.encrypt`).
 - `tests/conftest.py`:

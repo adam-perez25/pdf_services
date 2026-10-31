@@ -1649,3 +1649,10 @@ def edit_metadata(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# Flujo de trabajo: the chaining runs in the browser (static/workflow.js), which
+# calls the existing /api endpoints one after another, so only the page lives here.
+@app.get("/workflow", response_class=HTMLResponse)
+async def workflow_page():
+    return render_page("workflow.html")

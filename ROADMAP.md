@@ -22,7 +22,7 @@ Planned work for PDFService, ordered by priority. Each item is one branch.
 | Item | Effort | Notes |
 |---|---|---|
 | OCR for scanned PDFs | L | `ocrmypdf` + Tesseract (Spanish) in the Dockerfile; ~200 MB+ image growth; slow, needs temp files, BackgroundTask cleanup and a timeout. |
-| Chain tools | L | e.g. merge, then compress, then download in one flow, reusing organizer document ids. |
+| Chain tools | L | **Implemented** (`feature/chain-tools`) client-side: `/workflow` page whose `static/workflow.js` calls the existing `/api` endpoints in sequence, feeding each result to the next step; no backend chaining endpoint. New tools are one entry in `STEP_DEFINITIONS`. |
 | Sign a PDF | L | Draw or upload a signature and place it on a page, building on the organizer preview UI. |
 | Extract text (PDF to TXT) | S-M | Only if needed; returns nothing for scans until OCR exists. |
 
