@@ -2,14 +2,14 @@
 
 Planned work for PDFService, ordered by priority. Each item is one branch.
 
-## Phase 1: Hardening (do first, protects everything after it)
+## Phase 1: Hardening (done)
 
 | Item | Branch | Effort | Summary |
 |---|---|---|---|
 | Upload limits, clear errors, encrypted PDFs | `feature/hardening` | S | `MAX_UPLOAD_MB` with a 413 response and a memory limit in `docker-compose.yml`; map known errors to Spanish messages instead of `f"...: {error}"` (11 handlers in `app/main.py`) and log the raw error; detect password-protected PDFs and say so. |
 | Dark mode | `feature/dark-mode` | S | `prefers-color-scheme: dark` in `static/styles.css` (today it only has reduced-motion and mobile queries). |
 
-## Phase 2: New tools (one branch each)
+## Phase 2: New tools (done)
 
 | Item | Branch | Effort | Summary |
 |---|---|---|---|
