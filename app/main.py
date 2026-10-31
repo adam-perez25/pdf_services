@@ -1,3 +1,4 @@
+from collections import deque
 from contextlib import asynccontextmanager, contextmanager
 import importlib.util
 from io import BytesIO
@@ -252,6 +253,7 @@ def health():
             "libreoffice": find_soffice() is not None,
             "ghostscript": find_ghostscript() is not None,
             "ocr": ocr_available(),
+            "heavy_jobs": HEAVY_JOBS.status(),
         },
     )
 
@@ -442,6 +444,131 @@ def file_download(path: Path, filename: str, media_type: str = "application/pdf"
     )
 
 
+# --- Heavy job limiter -------------------------------------------------------
+# Two jobs on 500 MB files at once could exceed the container's memory
+# (mem_limit 3g), so each job reserves an estimate of the memory it needs from
+# a shared budget and waits in line while the budget is used up. Small jobs
+# (the usual few-MB PDFs) skip the line entirely, so they never wait.
+# The budget leaves about 1 GB of the 3 GB for Python itself, the small jobs
+# that skip the line and estimates that fall short.
+HEAVY_JOB_BUDGET_MB = env_int("HEAVY_JOB_BUDGET_MB", 2000, 100, 1_000_000)
+# How long a request waits for its turn before giving up with a 503.
+HEAVY_JOB_WAIT_SECONDS = env_int("HEAVY_JOB_WAIT_SECONDS", 300, 1, 24 * 3600)
+# Jobs estimated below this many MB never wait and reserve nothing.
+HEAVY_JOB_MIN_MB = 100
+HEAVY_JOB_RETRY_AFTER_SECONDS = 60
+HEAVY_JOB_BUSY_MESSAGE = (
+    "El servidor está ocupado con otros documentos grandes. "
+    "Inténtalo de nuevo en unos minutos."
+)
+# Estimated memory per tool: (factor x upload size, fixed MB). From the
+# measurements with a 200 MB / 1000-page PDF: merging 2 copies used ~500 MB
+# (1.25x), split/organize/stamp/metadata ~300 MB (1.5x), protect ~650 MB
+# (3.25x). Ghostscript, Tesseract and LibreOffice run as separate processes
+# whose memory depends little on the file size, hence the fixed part.
+# pdf-to-images renders one page at a time, bounded by MAX_IMAGE_PIXELS
+# (40 Mpx x 4 bytes = 160 MB per bitmap, plus the RGB copy and the encoder).
+HEAVY_JOB_ESTIMATES = {
+    "merge": (1.3, 0),
+    "split": (1.5, 0),
+    "edit": (1.5, 0),  # organizer save, edit-pages
+    "stamp": (1.5, 0),
+    "metadata": (1.5, 0),
+    "protect": (3.5, 0),
+    "unlock": (3.5, 0),
+    "sign": (1.5, 100),
+    "images-to-pdf": (1.5, 300),  # one decoded image at a time
+    "pdf-to-images": (0.5, 400),
+    "extract-text": (0.5, 0),  # pdfium, page by page, written to disk
+    "compress": (0.5, 300),  # Ghostscript
+    "ocr": (0.5, 600),  # ocrmypdf + OCR_JOBS Tesseract workers
+    "office": (3.0, 500),  # LibreOffice; documents grow a lot once loaded
+}
+
+
+def job_estimate_mb(tool: str, *sizes: int) -> int:
+    """Estimated memory in MB of running `tool` on files of these byte sizes."""
+    factor, fixed = HEAVY_JOB_ESTIMATES[tool]
+    return math.ceil(factor * sum(sizes) / (1024 * 1024) + fixed)
+
+
+class HeavyJobLimiter:
+    """A memory budget shared by the running jobs, handed out in arrival order.
+
+    A job runs when it is first in line and its estimate fits in what is left
+    of the budget, or when nothing else is running (so a job bigger than the
+    whole budget still runs, alone). Strict first-come order means a waiting
+    big job is never overtaken by later ones, so it cannot starve.
+    """
+
+    def __init__(self):
+        self.condition = threading.Condition()
+        self.queue: deque = deque()
+        self.reserved_mb = 0
+        self.running = 0
+
+    def acquire(self, megabytes: int, budget: int, wait_seconds: float) -> bool:
+        deadline = time.monotonic() + wait_seconds
+        ticket = object()
+        with self.condition:
+            self.queue.append(ticket)
+            try:
+                while not (
+                    self.queue[0] is ticket
+                    and (self.running == 0 or self.reserved_mb + megabytes <= budget)
+                ):
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        return False
+                    self.condition.wait(remaining)
+                self.reserved_mb += megabytes
+                self.running += 1
+                return True
+            finally:
+                # Whether it got in or gave up, the next one in line may now go.
+                self.queue.remove(ticket)
+                self.condition.notify_all()
+
+    def release(self, megabytes: int) -> None:
+        with self.condition:
+            self.reserved_mb -= megabytes
+            self.running -= 1
+            self.condition.notify_all()
+
+    def status(self) -> dict:
+        with self.condition:
+            return {"running": self.running, "reserved_mb": self.reserved_mb, "waiting": len(self.queue)}
+
+
+HEAVY_JOBS = HeavyJobLimiter()
+
+
+@contextmanager
+def heavy_job(megabytes: int, uploads: list[UploadFile] = ()):
+    """Hold a share of the memory budget while a job runs.
+
+    Use it around the processing only, after the cheap validations, so bad
+    requests fail at once. If the turn does not come within
+    HEAVY_JOB_WAIT_SECONDS it answers 503 with Retry-After (closing `uploads`,
+    like check_upload_sizes). The share is released even if the job fails.
+    """
+    if megabytes < HEAVY_JOB_MIN_MB:
+        yield
+        return
+    if not HEAVY_JOBS.acquire(megabytes, HEAVY_JOB_BUDGET_MB, HEAVY_JOB_WAIT_SECONDS):
+        for upload in uploads:
+            upload.file.close()
+        raise HTTPException(
+            status_code=503,
+            detail=HEAVY_JOB_BUSY_MESSAGE,
+            headers={"Retry-After": str(HEAVY_JOB_RETRY_AFTER_SECONDS)},
+        )
+    try:
+        yield
+    finally:
+        HEAVY_JOBS.release(megabytes)
+
+
 # The file-processing endpoints are plain functions, not async: FastAPI runs
 # them in a worker thread, so a long merge or conversion does not freeze the
 # server for everyone else.
@@ -462,9 +589,11 @@ def merge_pdfs(
                     status_code=400,
                     detail="Todos los archivos deben tener extension PDF.",
                 )
-            writer.append(open_pdf_reader(file.file))
+        with heavy_job(job_estimate_mb("merge", *map(upload_size, files))):
+            for file in files:
+                writer.append(open_pdf_reader(file.file))
 
-        output_path = write_pdf_to_file(writer)
+            output_path = write_pdf_to_file(writer)
         writer.close()
     except HTTPException:
         writer.close()
@@ -508,21 +637,22 @@ def split_pdf(
     check_upload_sizes([file])
 
     try:
-        reader = open_pdf_reader(file.file)
-        page_count = len(reader.pages)
-        end_page = end_page or page_count
-        if start_page < 1 or end_page < start_page or end_page > page_count:
-            raise HTTPException(
-                status_code=400,
-                detail=f"El rango debe estar entre 1 y {page_count}.",
-            )
+        with heavy_job(job_estimate_mb("split", upload_size(file))):
+            reader = open_pdf_reader(file.file)
+            page_count = len(reader.pages)
+            end_page = end_page or page_count
+            if start_page < 1 or end_page < start_page or end_page > page_count:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El rango debe estar entre 1 y {page_count}.",
+                )
 
-        writer = PdfWriter()
-        for page_index in range(start_page - 1, end_page):
-            writer.add_page(reader.pages[page_index])
+            writer = PdfWriter()
+            for page_index in range(start_page - 1, end_page):
+                writer.add_page(reader.pages[page_index])
 
-        output_path = write_pdf_to_file(writer)
-        writer.close()
+            output_path = write_pdf_to_file(writer)
+            writer.close()
     except Exception as error:
         if isinstance(error, HTTPException):
             raise
@@ -585,59 +715,60 @@ def split_pdf_zip(
     check_upload_sizes([file])
 
     try:
-        reader = open_pdf_reader(file.file)
-        page_count = len(reader.pages)
-        base = clean_base_name(base_name, "split-pdf")
-        if base.lower().endswith(".pdf"):
-            base = base[:-4]
+        with heavy_job(job_estimate_mb("split", upload_size(file))):
+            reader = open_pdf_reader(file.file)
+            page_count = len(reader.pages)
+            base = clean_base_name(base_name, "split-pdf")
+            if base.lower().endswith(".pdf"):
+                base = base[:-4]
 
-        if mode == "pages":
-            parts = [(page, page) for page in range(1, page_count + 1)]
-            digits = max(3, len(str(page_count)))
-            part_names = [f"{base}-page-{page:0{digits}d}.pdf" for page, _ in parts]
-            zip_name = f"{base}.zip"
-        else:
-            parts = parse_page_ranges(ranges, page_count)
+            if mode == "pages":
+                parts = [(page, page) for page in range(1, page_count + 1)]
+                digits = max(3, len(str(page_count)))
+                part_names = [f"{base}-page-{page:0{digits}d}.pdf" for page, _ in parts]
+                zip_name = f"{base}.zip"
+            else:
+                parts = parse_page_ranges(ranges, page_count)
+                try:
+                    given_names = [str(name) for name in json.loads(names)]
+                except (ValueError, TypeError) as error:
+                    raise HTTPException(status_code=400, detail="Los nombres no son válidos.") from error
+                given_names += [f"split-{start}-{end}" for start, end in parts[len(given_names):]]
+                part_names = unique_pdf_names(given_names[:len(parts)])
+                zip_name = f"{Path(file.filename).stem}-split.zip"
+
+            def build_part(start: int, end: int) -> Path:
+                # Each part goes through a work file, so a big range is never held
+                # in memory as a whole.
+                writer = PdfWriter()
+                try:
+                    for page_index in range(start - 1, end):
+                        writer.add_page(reader.pages[page_index])
+                    return write_pdf_to_file(writer)
+                finally:
+                    writer.close()
+
+            if len(parts) == 1:
+                return file_download(build_part(*parts[0]), part_names[0])
+
+            # The ZIP goes to the documents folder, so it is removed once sent and,
+            # if the download is interrupted, by the regular sweep. PDF content is
+            # already compressed, so the parts are stored as they are: compressing
+            # them again costs a lot of time and saves almost nothing.
+            (zip_path,) = new_job_paths(".zip")
             try:
-                given_names = [str(name) for name in json.loads(names)]
-            except (ValueError, TypeError) as error:
-                raise HTTPException(status_code=400, detail="Los nombres no son válidos.") from error
-            given_names += [f"split-{start}-{end}" for start, end in parts[len(given_names):]]
-            part_names = unique_pdf_names(given_names[:len(parts)])
-            zip_name = f"{Path(file.filename).stem}-split.zip"
-
-        def build_part(start: int, end: int) -> Path:
-            # Each part goes through a work file, so a big range is never held
-            # in memory as a whole.
-            writer = PdfWriter()
-            try:
-                for page_index in range(start - 1, end):
-                    writer.add_page(reader.pages[page_index])
-                return write_pdf_to_file(writer)
-            finally:
-                writer.close()
-
-        if len(parts) == 1:
-            return file_download(build_part(*parts[0]), part_names[0])
-
-        # The ZIP goes to the documents folder, so it is removed once sent and,
-        # if the download is interrupted, by the regular sweep. PDF content is
-        # already compressed, so the parts are stored as they are: compressing
-        # them again costs a lot of time and saves almost nothing.
-        (zip_path,) = new_job_paths(".zip")
-        try:
-            with protect_from_sweeper(zip_path), zipfile.ZipFile(
-                zip_path, "w", compression=zipfile.ZIP_STORED
-            ) as archive:
-                for (start, end), part_name in zip(parts, part_names):
-                    part_path = build_part(start, end)
-                    try:
-                        archive.write(part_path, part_name)
-                    finally:
-                        part_path.unlink(missing_ok=True)
-        except BaseException:
-            zip_path.unlink(missing_ok=True)
-            raise
+                with protect_from_sweeper(zip_path), zipfile.ZipFile(
+                    zip_path, "w", compression=zipfile.ZIP_STORED
+                ) as archive:
+                    for (start, end), part_name in zip(parts, part_names):
+                        part_path = build_part(start, end)
+                        try:
+                            archive.write(part_path, part_name)
+                        finally:
+                            part_path.unlink(missing_ok=True)
+            except BaseException:
+                zip_path.unlink(missing_ok=True)
+                raise
     except HTTPException:
         raise
     except Exception as error:
@@ -830,7 +961,8 @@ def edit_document(
     try:
         # An open file, not the path: given a path, pypdf reads the whole
         # file into memory first.
-        with protect_from_sweeper(path), path.open("rb") as source:
+        with heavy_job(job_estimate_mb("edit", path.stat().st_size)), protect_from_sweeper(path), \
+                path.open("rb") as source:
             writer = build_edited_writer(open_pdf_reader(source), pages)
             try:
                 output_path = write_pdf_to_file(writer)
@@ -868,11 +1000,12 @@ def edit_pages(
     check_upload_sizes([file])
 
     try:
-        writer = build_edited_writer(open_pdf_reader(file.file), pages)
-        try:
-            output_path = write_pdf_to_file(writer)
-        finally:
-            writer.close()
+        with heavy_job(job_estimate_mb("edit", upload_size(file))):
+            writer = build_edited_writer(open_pdf_reader(file.file), pages)
+            try:
+                output_path = write_pdf_to_file(writer)
+            finally:
+                writer.close()
     except HTTPException:
         raise
     except Exception as error:
@@ -911,26 +1044,27 @@ def images_to_pdf(
 
     writer = PdfWriter()
     try:
-        # Pillow applies one resolution to every page, so each image becomes
-        # its own one-page PDF at its own dpi and the pages are merged after.
-        # Images are decoded one at a time: a decoded photo takes many times
-        # the memory of its file, so holding them all could exhaust memory.
-        for image_file in images:
-            try:
-                with Image.open(image_file.file, formats=ALLOWED_IMAGE_FORMATS) as image:
-                    converted = image.convert("RGB")
-            except (UnidentifiedImageError, OSError) as error:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"El archivo {image_file.filename or 'seleccionado'} no es una imagen válida.",
-                ) from error
-            try:
-                page = BytesIO()
-                converted.save(page, format="PDF", resolution=a4_resolution(*converted.size))
-            finally:
-                converted.close()
-            writer.append(PdfReader(page))
-        output_path = write_pdf_to_file(writer)
+        with heavy_job(job_estimate_mb("images-to-pdf", *map(upload_size, images))):
+            # Pillow applies one resolution to every page, so each image becomes
+            # its own one-page PDF at its own dpi and the pages are merged after.
+            # Images are decoded one at a time: a decoded photo takes many times
+            # the memory of its file, so holding them all could exhaust memory.
+            for image_file in images:
+                try:
+                    with Image.open(image_file.file, formats=ALLOWED_IMAGE_FORMATS) as image:
+                        converted = image.convert("RGB")
+                except (UnidentifiedImageError, OSError) as error:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"El archivo {image_file.filename or 'seleccionado'} no es una imagen válida.",
+                    ) from error
+                try:
+                    page = BytesIO()
+                    converted.save(page, format="PDF", resolution=a4_resolution(*converted.size))
+                finally:
+                    converted.close()
+                writer.append(PdfReader(page))
+            output_path = write_pdf_to_file(writer)
     except HTTPException:
         raise
     except Exception as error:
@@ -1012,7 +1146,8 @@ def pdf_to_images(
         return output.getvalue()
 
     try:
-        with protect_from_sweeper(input_path, zip_path):
+        with heavy_job(job_estimate_mb("pdf-to-images", upload_size(file)), [file]), \
+                protect_from_sweeper(input_path, zip_path):
             with input_path.open("wb") as destination:
                 shutil.copyfileobj(file.file, destination)
 
@@ -1110,7 +1245,8 @@ def convert_office_to_pdf(
         )
 
     try:
-        with tempfile.TemporaryDirectory() as temporary_directory:
+        with heavy_job(job_estimate_mb("office", upload_size(file))), \
+                tempfile.TemporaryDirectory() as temporary_directory:
             temporary_path = Path(temporary_directory)
             input_path = temporary_path / f"source{file_extension}"
             with input_path.open("wb") as destination:
@@ -1139,6 +1275,8 @@ def convert_office_to_pdf(
             shutil.move(output_path, result_path)
     except subprocess.TimeoutExpired as error:
         raise HTTPException(status_code=504, detail="La conversión tardó demasiado.") from error
+    except HTTPException:
+        raise
     except Exception as error:
         raise processing_error("No se pudo convertir el documento.", error) from error
     finally:
@@ -1197,7 +1335,8 @@ def compress_pdf(
 
     try:
         # A big PDF can take longer than DOCUMENT_TTL_SECONDS to compress.
-        with protect_from_sweeper(input_path, output_path):
+        with heavy_job(job_estimate_mb("compress", upload_size(file))), \
+                protect_from_sweeper(input_path, output_path):
             with input_path.open("wb") as destination:
                 shutil.copyfileobj(file.file, destination)
             # Ghostscript "repairs" almost anything without failing, so make sure
@@ -1296,16 +1435,17 @@ def protect_pdf(
         check_upload_sizes([file])
         check_password(password)
         try:
-            reader = PdfReader(file.file)
-            if reader.is_encrypted:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Este PDF ya está protegido con contraseña. Desbloquéalo primero.",
-                )
-            writer = PdfWriter(clone_from=reader)
-            writer.encrypt(user_password=password, owner_password=password, algorithm="AES-256")
-            output_path = write_pdf_to_file(writer)
-            writer.close()
+            with heavy_job(job_estimate_mb("protect", upload_size(file))):
+                reader = PdfReader(file.file)
+                if reader.is_encrypted:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Este PDF ya está protegido con contraseña. Desbloquéalo primero.",
+                    )
+                writer = PdfWriter(clone_from=reader)
+                writer.encrypt(user_password=password, owner_password=password, algorithm="AES-256")
+                output_path = write_pdf_to_file(writer)
+                writer.close()
         except HTTPException:
             raise
         except Exception as error:
@@ -1331,19 +1471,20 @@ def unlock_pdf(
         if password:
             check_password(password)
         try:
-            reader = PdfReader(file.file)
-            if not reader.is_encrypted:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Este PDF no está protegido con contraseña.",
-                )
-            if not reader.decrypt(password):
-                if not password:
-                    raise HTTPException(status_code=400, detail="Escribe la contraseña del PDF.")
-                raise HTTPException(status_code=400, detail="Contraseña incorrecta")
-            writer = PdfWriter(clone_from=reader)
-            output_path = write_pdf_to_file(writer)
-            writer.close()
+            with heavy_job(job_estimate_mb("unlock", upload_size(file))):
+                reader = PdfReader(file.file)
+                if not reader.is_encrypted:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Este PDF no está protegido con contraseña.",
+                    )
+                if not reader.decrypt(password):
+                    if not password:
+                        raise HTTPException(status_code=400, detail="Escribe la contraseña del PDF.")
+                    raise HTTPException(status_code=400, detail="Contraseña incorrecta")
+                writer = PdfWriter(clone_from=reader)
+                output_path = write_pdf_to_file(writer)
+                writer.close()
         except HTTPException:
             raise
         except Exception as error:
@@ -1576,18 +1717,19 @@ def stamp_pdf(
             suffix = "marca-de-agua"
 
         try:
-            writer = PdfWriter(clone_from=open_pdf_reader(file.file))
-            last = first + len(writer.pages) - 1 if mode == "numbers" else 0
-            for index, page in enumerate(writer.pages):
-                _, width, height = visible_page_box(page)
-                if mode == "numbers":
-                    label = STAMP_NUMBER_FORMATS[number_format].format(n=first + index, total=last)
-                    overlay = stamp_overlay(page, number_stream(label, size, position, width, height))
-                else:
-                    overlay = stamp_overlay(page, watermark_stream(text, size, angle, width, height), alpha)
-                page.merge_page(overlay)
-            output_path = write_pdf_to_file(writer)
-            writer.close()
+            with heavy_job(job_estimate_mb("stamp", upload_size(file))):
+                writer = PdfWriter(clone_from=open_pdf_reader(file.file))
+                last = first + len(writer.pages) - 1 if mode == "numbers" else 0
+                for index, page in enumerate(writer.pages):
+                    _, width, height = visible_page_box(page)
+                    if mode == "numbers":
+                        label = STAMP_NUMBER_FORMATS[number_format].format(n=first + index, total=last)
+                        overlay = stamp_overlay(page, number_stream(label, size, position, width, height))
+                    else:
+                        overlay = stamp_overlay(page, watermark_stream(text, size, angle, width, height), alpha)
+                    page.merge_page(overlay)
+                output_path = write_pdf_to_file(writer)
+                writer.close()
         except HTTPException:
             raise
         except Exception as error:
@@ -1689,31 +1831,32 @@ def edit_metadata(
                     detail=f"El campo «{field}» no puede superar {MAX_METADATA_LENGTH} caracteres.",
                 )
         reader = open_metadata_reader(file)
-        writer = PdfWriter(clone_from=reader)
-        # The XMP stream repeats the same properties and viewers prefer it, so
-        # it is always dropped: otherwise the old values would still show up.
-        if "/Metadata" in writer.root_object:
-            del writer.root_object["/Metadata"]
-        if remove_all:
-            writer.metadata = None
-        else:
-            if writer._info is None:
-                writer.metadata = {}
-            info = writer._info.get_object()
-            editable = set(METADATA_FIELDS.values())
-            for key in list(info.keys()):
-                if key not in editable and key not in METADATA_KEPT_KEYS:
-                    del info[key]
-            for field, value in values.items():
-                key = METADATA_FIELDS[field]
-                if value.strip():
-                    info[NameObject(key)] = TextStringObject(value.strip())
-                elif key in info:
-                    del info[key]
-        # The clone copied every object, including the old /Info and XMP
-        # stream; drop whatever is no longer referenced so they are not written.
-        writer.compress_identical_objects(remove_duplicates=False, remove_unreferenced=True)
-        output_path = write_pdf_to_file(writer)
+        with heavy_job(job_estimate_mb("metadata", upload_size(file))):
+            writer = PdfWriter(clone_from=reader)
+            # The XMP stream repeats the same properties and viewers prefer it, so
+            # it is always dropped: otherwise the old values would still show up.
+            if "/Metadata" in writer.root_object:
+                del writer.root_object["/Metadata"]
+            if remove_all:
+                writer.metadata = None
+            else:
+                if writer._info is None:
+                    writer.metadata = {}
+                info = writer._info.get_object()
+                editable = set(METADATA_FIELDS.values())
+                for key in list(info.keys()):
+                    if key not in editable and key not in METADATA_KEPT_KEYS:
+                        del info[key]
+                for field, value in values.items():
+                    key = METADATA_FIELDS[field]
+                    if value.strip():
+                        info[NameObject(key)] = TextStringObject(value.strip())
+                    elif key in info:
+                        del info[key]
+            # The clone copied every object, including the old /Info and XMP
+            # stream; drop whatever is no longer referenced so they are not written.
+            writer.compress_identical_objects(remove_duplicates=False, remove_unreferenced=True)
+            output_path = write_pdf_to_file(writer)
     except HTTPException:
         raise
     except Exception as error:
@@ -1807,7 +1950,8 @@ def extract_text(
         text_path.unlink(missing_ok=True)
 
     # A long extraction must not lose its files to the periodic sweep.
-    with protect_from_sweeper(input_path, text_path):
+    with heavy_job(job_estimate_mb("extract-text", upload_size(file)), [file]), \
+            protect_from_sweeper(input_path, text_path):
         try:
             with input_path.open("wb") as destination:
                 shutil.copyfileobj(file.file, destination)
@@ -2041,7 +2185,8 @@ def sign_document(
         image = load_signature_image(signature)
         try:
             # An open file, not the path: pypdf reads a path fully into memory.
-            with protect_from_sweeper(path), path.open("rb") as source:
+            with heavy_job(job_estimate_mb("sign", path.stat().st_size)), protect_from_sweeper(path), \
+                    path.open("rb") as source:
                 output_path = sign_to_file(source, boxes, image)
         except FileNotFoundError:
             raise document_gone() from None
@@ -2174,7 +2319,8 @@ def ocr_pdf(
         output_path.unlink(missing_ok=True)
 
     # OCR can run for hours on a big scan: keep the sweep away from its files.
-    with protect_from_sweeper(input_path, output_path):
+    with heavy_job(job_estimate_mb("ocr", upload_size(file)), [file]), \
+            protect_from_sweeper(input_path, output_path):
         try:
             with input_path.open("wb") as destination:
                 shutil.copyfileobj(file.file, destination)

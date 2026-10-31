@@ -32,7 +32,7 @@ Limits and timeouts configurable via env vars (500 MB per file / 1 GB per reques
 
 ## Ideas for later
 
-- Limit concurrent heavy jobs (two 500 MB jobs at once can exceed the 3 GB memory limit).
+- ~~Limit concurrent heavy jobs (two 500 MB jobs at once can exceed the 3 GB memory limit).~~ Done in `feature/heavy-job-limits`: weighted memory budget (`HEAVY_JOB_BUDGET_MB`), FIFO wait, 503 + `Retry-After` after `HEAVY_JOB_WAIT_SECONDS`.
 - Guard PDF to images at 300 dpi on 1000+ pages (time and temp disk).
 
 ## Not planned

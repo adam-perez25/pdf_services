@@ -24,3 +24,7 @@ services:
       OCR_TIMEOUT_SECONDS: "60"
       OCR_SECONDS_PER_PAGE: "20"
       OCR_MAX_TIMEOUT_SECONDS: "14400"
+      # Memory budget shared by big jobs (~1 GB of mem_limit left for the rest);
+      # raise it together with mem_limit.
+      HEAVY_JOB_BUDGET_MB: "2000"
+      HEAVY_JOB_WAIT_SECONDS: "300"
