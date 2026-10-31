@@ -377,3 +377,24 @@ def test_digital_text_is_kept_and_not_duplicated(client):
 
     assert response.status_code == 200
     assert extracted_text(response.content) == before
+
+
+def test_redo_ocr_refusal_falls_back_to_skip_text(client, ocr_ready, monkeypatch, documents_dir):
+    # Some PDFs make ocrmypdf refuse --redo-ocr: the request retries plainly.
+    commands = []
+
+    def fake_run_tool(command, timeout, env=None):
+        commands.append(command)
+        if "--redo-ocr" in command:
+            return subprocess.CompletedProcess(command, 2, "", "--redo-ocr is not supported for this PDF")
+        Path(command[-1]).write_bytes(Path(command[-2]).read_bytes())
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(main, "run_tool", fake_run_tool)
+
+    response = ocr(client, make_mixed_pdf())
+
+    assert response.status_code == 200
+    assert len(commands) == 2
+    assert "--redo-ocr" in commands[0] and "--skip-text" in commands[1]
+    assert list(documents_dir.iterdir()) == []
