@@ -65,4 +65,6 @@ function resetPdfImagesForm() {
     pdfImagesInput.value = "";
     pdfImagesFileName.textContent = "o arrástralo aquí";
     pdfImagesBaseName.value = "pdf-images";
+    // A page selection belongs to the previous document.
+    pdfImagesPages.value = "";
 }

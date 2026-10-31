@@ -257,3 +257,10 @@ def test_non_finite_pixel_total_is_rejected():
     with pytest.raises(main.HTTPException) as error:
         main.check_pdf_to_images_budget(float("nan"), 1, 150, "png")
     assert error.value.status_code == 400
+
+
+def test_reversed_range_says_why(client):
+    response = convert(client, make_pdf(5), pages="3-1")
+
+    assert response.status_code == 400
+    assert "el inicio no puede ser mayor que el final" in response.json()["detail"]

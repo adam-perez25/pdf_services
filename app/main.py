@@ -542,7 +542,12 @@ def parse_page_ranges(value: str, page_count: int) -> list[tuple[int, int]]:
             raise HTTPException(status_code=400, detail=f"Rango inválido: {part}")
         start = int(match.group(1))
         end = int(match.group(2) or start)
-        if start < 1 or end < start or end > page_count:
+        if end < start:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Rango inválido: {part} (el inicio no puede ser mayor que el final).",
+            )
+        if start < 1 or end > page_count:
             raise HTTPException(
                 status_code=400,
                 detail=f"Los rangos deben estar entre 1 y {page_count}.",
@@ -1062,7 +1067,8 @@ def check_pdf_to_images_budget(total_pixels: float, page_total: int, dpi: int, i
             status_code=507,
             detail=(
                 f"{request} ocuparía unos {format_size_es(estimated_bytes)} y no hay espacio "
-                f"suficiente en el disco temporal del servidor ({format_size_es(free)} libres). "
+                f"suficiente en el disco temporal del servidor ({format_size_es(free)} libres, "
+                f"de los que se reservan {format_size_es(PDF_TO_IMAGES_MIN_FREE_MB * 1024 * 1024)}). "
                 "Elige menos páginas, una resolución menor o el formato JPG."
             ),
         )
