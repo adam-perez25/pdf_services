@@ -12,7 +12,7 @@
         <section class="intro">
             <p class="eyebrow">SERVICIO 09 / PDF A IMÁGENES</p>
             <h1>Convierte cada página<br><em>en una imagen.</em></h1>
-            <p class="lede">Descarga todas las páginas de un PDF como imágenes PNG o JPG.</p>
+            <p class="lede">Descarga las páginas de un PDF (todas o las que elijas) como imágenes PNG o JPG.</p>
         </section>
 
         <nav class="service-back" aria-label="Navegación del servicio">
@@ -47,6 +47,11 @@
                         <option value="150" selected>Media: 150 ppp, buena para pantalla</option>
                         <option value="300">Alta: 300 ppp, buena para imprimir</option>
                     </select>
+                </label>
+
+                <label class="name-field">
+                    <span>Páginas (vacío = todas; por ejemplo 1-3, 5)</span>
+                    <input id="pdf-images-pages" type="text" maxlength="200" autocomplete="off" placeholder="Todas">
                 </label>
 
                 <label class="name-field">
