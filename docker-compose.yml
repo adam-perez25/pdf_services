@@ -8,6 +8,17 @@ services:
     # about 2-3 times the file size in memory; 3 GB leaves room for that plus
     # LibreOffice or Ghostscript. Raise it together with MAX_UPLOAD_MB.
     mem_limit: 3g
+    # A tiny init as PID 1 reaps the zombie processes left by killed
+    # LibreOffice / Ghostscript / Tesseract children.
+    init: true
+    # The service needs no Linux capabilities and never gains privileges
+    # (it runs as an unprivileged user); pids_limit stops a fork storm while
+    # leaving room for LibreOffice and the OCR workers.
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    pids_limit: 512
     # Limits and timeouts (these are the defaults; edit and run
     # `docker compose up -d` to apply). See "Configuración" in the README.
     environment:
