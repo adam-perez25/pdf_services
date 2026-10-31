@@ -215,6 +215,12 @@ body.is-reordering, body.is-reordering * { cursor: grabbing !important; }
 .name-field span { display: block; margin-bottom: 8px; color: var(--muted); font: 500 11px "DM Mono", monospace; }
 .name-field input, .name-field select { width: 100%; padding: 14px 15px; border: 1px solid var(--line); color: var(--ink); background: var(--white); font: 600 14px "Manrope", sans-serif; outline: none; }
 .name-field input:focus, .name-field select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-ring); }
+.check-field { display: flex; align-items: center; gap: 10px; margin-top: 20px; font: 600 14px "Manrope", sans-serif; cursor: pointer; }
+.check-field input { width: 18px; height: 18px; accent-color: var(--accent); }
+.metadata-fields { margin: 0; padding: 0; border: 0; min-width: 0; }
+.metadata-fields:disabled { opacity: .45; }
+.metadata-details { margin: 14px 0 0; color: var(--muted); font: 500 12px "DM Mono", monospace; }
+.metadata-details[hidden] { display: none; }
 .primary-button { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 16px; padding: 16px 18px; border: 0; color: var(--button-text); background: var(--button-bg); font: 700 14px "Manrope", sans-serif; cursor: pointer; }
 .primary-button:hover { background: var(--button-hover-bg); }
 .status { min-height: 20px; margin: 13px 0 0; color: var(--success); font-size: 13px; }

@@ -46,6 +46,10 @@ mismo servidor y no requiere un frontend independiente.
   de marca de agua centrado, horizontal o en diagonal, con opacidad
   configurable. El texto usa la fuente Helvetica estándar (admite tildes y
   eñes) y aparece derecho aunque las páginas estén giradas.
+- **Editar metadatos:** muestra y cambia el título, el autor, el asunto y las
+  palabras clave de un PDF, o elimina todos sus metadatos (incluido el bloque
+  XMP) antes de compartirlo, para no revelar quién lo creó, con qué programa ni
+  cuándo.
 - **Organizar páginas:** muestra una vista previa de cada página y permite
   girarlas, eliminarlas y reordenarlas (con los botones o arrastrándolas, también
   en pantallas táctiles manteniendo pulsada la página) antes de descargar el PDF
@@ -185,6 +189,7 @@ como constantes en `app/main.py`:
 | `STAMP_WATERMARK_MAX_LENGTH` | 100 | Longitud máxima del texto de la marca de agua. |
 | `STAMP_MAX_START_NUMBER` | 100 000 | Número inicial máximo de la numeración. |
 | `STAMP_MARGIN` | 28 pt | Distancia de los números de página al borde. |
+| `MAX_METADATA_LENGTH` | 500 | Longitud máxima de cada campo en **Editar metadatos**. |
 
 Si una conversión o compresión supera su tiempo máximo, se termina el proceso
 externo junto con todos los procesos que haya iniciado.
@@ -195,7 +200,7 @@ de Docker.
 ## Interfaz web
 
 Cada herramienta tiene su propia página: `/` (inicio), `/merge`, `/split`,
-`/pages`, `/compress`, `/protect`, `/images`, `/pdf-to-images`, `/stamp`, `/word`,
+`/pages`, `/compress`, `/metadata`, `/protect`, `/images`, `/pdf-to-images`, `/stamp`, `/word`,
 `/excel` y `/powerpoint`.
 
 La interfaz tiene modo oscuro automático: sigue la preferencia de tema claro u
@@ -221,6 +226,8 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 | `POST` | `/api/protect` | Cifra un PDF con AES-256 usando `password` (obligatoria, máximo 127 bytes). Responde `400` si el PDF ya estaba protegido. |
 | `POST` | `/api/unlock` | Quita la contraseña de un PDF protegido usando `password`. Responde `400` con `Contraseña incorrecta` si no coincide, o si el PDF no estaba protegido. |
 | `POST` | `/api/stamp` | Numera las páginas (`mode=numbers`, por defecto) o añade una marca de agua (`mode=watermark`). Números: `position` (`bottom-center` por defecto, `bottom-left`, `bottom-right`, `top-center`, `top-left`, `top-right`), `number_format` (`n` → `1`, `n-of-total` → `1 / N`, `page-n-of-total` → `Página 1 de N`; N es el último número), `start_number` (0-100000, por defecto 1) y `font_size` (6-72, por defecto 12). Marca de agua: `text` (obligatorio, hasta 100 caracteres), `font_size` (8-200, por defecto 60), `opacity` (0.1-1, por defecto 0.3) y `rotation` (`45` por defecto o `0`). `output_name` es opcional (`<nombre>-numerado.pdf` / `<nombre>-marca-de-agua.pdf`). |
+| `POST` | `/api/metadata/read` | Devuelve en JSON los metadatos de un PDF (`title`, `author`, `subject`, `keywords`, `creator`, `producer`, `creation_date`, `modification_date`; `null` si faltan) y su número de páginas (`pages`). |
+| `POST` | `/api/metadata` | Escribe `title`, `author`, `subject` y `keywords` (máximo 500 caracteres cada uno; un campo vacío o ausente se elimina) y quita el bloque XMP. Con `remove_all=true` elimina todos los metadatos. La descarga se llama `<nombre>-metadatos.pdf` salvo que se indique `output_name`. |
 | `POST` | `/api/documents` | Sube un PDF una sola vez y devuelve su `id` y número de páginas. |
 | `GET` | `/api/documents/{id}/pages/{n}` | Devuelve la página `n` como JPEG; `width` controla el tamaño (100-2000 px). |
 | `POST` | `/api/documents/{id}/edit` | Genera el PDF editado a partir de `pages` sin volver a subir el archivo. |
