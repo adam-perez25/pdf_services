@@ -242,3 +242,18 @@ def test_other_write_errors_stay_generic(client, sample_pdf, documents_dir, monk
     assert response.status_code == 400
     assert response.json()["detail"] == "No se pudo convertir el PDF en imágenes."
     assert list(documents_dir.iterdir()) == []
+
+
+def test_overlong_page_list_is_rejected_quickly(client, documents_dir):
+    # "1-3,1-3,..." far past the limit must not be expanded page by page.
+    response = convert(client, make_pdf(3), pages=",".join(["1-3"] * 1000))
+
+    assert response.status_code == 400
+    assert str(main.PAGE_SELECTION_MAX_LENGTH) in response.json()["detail"]
+    assert list(documents_dir.iterdir()) == []
+
+
+def test_non_finite_pixel_total_is_rejected():
+    with pytest.raises(main.HTTPException) as error:
+        main.check_pdf_to_images_budget(float("nan"), 1, 150, "png")
+    assert error.value.status_code == 400

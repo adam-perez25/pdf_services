@@ -991,6 +991,9 @@ def render_scale(width: float, height: float, dpi: int) -> float:
     return scale
 
 
+PAGE_SELECTION_MAX_LENGTH = 1000
+
+
 def selected_page_numbers(pages: str, page_count: int) -> list[int]:
     """1-based page numbers in the parse_page_ranges syntax; empty = all.
 
@@ -998,6 +1001,13 @@ def selected_page_numbers(pages: str, page_count: int) -> list[int]:
     """
     if not pages.strip():
         return list(range(1, page_count + 1))
+    if len(pages) > PAGE_SELECTION_MAX_LENGTH:
+        # Repeating huge ranges ("1-2000,1-2000,...") would make the expansion
+        # below run for a long time before the duplicates are dropped.
+        raise HTTPException(
+            status_code=400,
+            detail=f"La lista de páginas puede tener como máximo {PAGE_SELECTION_MAX_LENGTH} caracteres.",
+        )
     numbers = (
         number
         for start, end in parse_page_ranges(pages, page_count)
@@ -1031,6 +1041,9 @@ def is_disk_full(error: BaseException | None) -> bool:
 
 def check_pdf_to_images_budget(total_pixels: float, page_total: int, dpi: int, image_format: str):
     """Reject a conversion that is too big, before rendering anything."""
+    if not math.isfinite(total_pixels):
+        # A broken page size would make every comparison below false.
+        raise HTTPException(status_code=400, detail="El PDF tiene páginas con un tamaño no válido.")
     estimated_bytes = total_pixels * IMAGE_BYTES_PER_PIXEL[image_format]
     request = f"Convertir {'1 página' if page_total == 1 else f'{page_total} páginas'} a {dpi} ppp"
     if total_pixels > PDF_TO_IMAGES_MAX_MEGAPIXELS * 1_000_000:
