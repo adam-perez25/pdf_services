@@ -6,9 +6,10 @@ paths:
 
 - Run `python -m pytest` (pytest.ini: testpaths=tests, pythonpath=.). Tests import `app.main as main`.
 - Files:
-  - one per tool: test_compress, test_images_to_pdf, test_office_to_pdf, test_page_organizer, test_pdf_to_images, test_split_zip;
+  - one per tool: test_compress, test_metadata, test_images_to_pdf, test_office_to_pdf, test_page_organizer, test_pdf_to_images, test_protect, test_split_zip, test_stamp (renders with pypdfium2 to check where the text lands on rotated pages);
   - test_pdf_tools covers merge, split, pdf-info and edit-pages;
-  - test_health, test_run_tool and test_security_headers cover cross-cutting behaviour.
+  - test_health, test_run_tool and test_security_headers cover cross-cutting behaviour;
+  - test_hardening covers upload limits (413, via monkeypatched `MAX_UPLOAD_MB`), non-leaking error details and password-protected PDFs (built with `PdfWriter.encrypt`).
 - `tests/conftest.py`:
   - `documents_dir` monkeypatches `main.DOCUMENTS_DIR` to `tmp_path/"documents"`, so tests can assert that it is left empty.
   - `client` is `TestClient(main.app)`. It is NOT used as a context manager, so the lifespan and sweeper do not run.

@@ -37,6 +37,19 @@ mismo servidor y no requiere un frontend independiente.
   mediante Ghostscript, ideal para documentos escaneados. Tres niveles: máxima
   (72 ppp), recomendada (150 ppp) y alta calidad (300 ppp). Si el resultado no
   es más pequeño, se descarga el original.
+- **Proteger PDF:** cifra un PDF con AES-256 para que solo se abra con
+  contraseña, o quita la contraseña de un PDF protegido si se conoce. La
+  contraseña solo se usa durante la petición: no se guarda ni se registra.
+- **Numerar páginas y marca de agua:** añade a todas las páginas el número de
+  página (formato `1`, `1 / N` o `Página 1 de N`, número inicial, tamaño y
+  posición arriba o abajo, a la izquierda, centrado o a la derecha) o un texto
+  de marca de agua centrado, horizontal o en diagonal, con opacidad
+  configurable. El texto usa la fuente Helvetica estándar (admite tildes y
+  eñes) y aparece derecho aunque las páginas estén giradas.
+- **Editar metadatos:** muestra y cambia el título, el autor, el asunto y las
+  palabras clave de un PDF, o elimina todos sus metadatos (incluido el bloque
+  XMP) antes de compartirlo, para no revelar quién lo creó, con qué programa ni
+  cuándo.
 - **Organizar páginas:** muestra una vista previa de cada página y permite
   girarlas, eliminarlas y reordenarlas (con los botones o arrastrándolas, también
   en pantallas táctiles manteniendo pulsada la página) antes de descargar el PDF
@@ -169,6 +182,14 @@ como constantes en `app/main.py`:
 | `OFFICE_TIMEOUT_SECONDS` | 120 s | Tiempo máximo de una conversión con LibreOffice; si se supera responde `504`. |
 | `COMPRESSION_TIMEOUT_SECONDS` | 600 s | Tiempo máximo de la compresión con Ghostscript; si se supera responde `504`. |
 | `MAX_IMAGE_PIXELS` | 40 000 000 | Límite de píxeles por imagen en **PDF a imágenes**. |
+| `MAX_UPLOAD_MB` | 50 MB | Tamaño máximo de cada archivo subido; si se supera responde `413`. |
+| `MAX_TOTAL_UPLOAD_MB` | 200 MB | Tamaño máximo de todos los archivos de una petición (**Unir PDF**, **Imágenes a PDF**); si se supera responde `413`. |
+| `STAMP_NUMBER_SIZE_RANGE` | 6-72 pt | Tamaños de letra admitidos para los números de página. |
+| `STAMP_WATERMARK_SIZE_RANGE` | 8-200 pt | Tamaños de letra admitidos para la marca de agua (se reduce si el texto no cabe). |
+| `STAMP_WATERMARK_MAX_LENGTH` | 100 | Longitud máxima del texto de la marca de agua. |
+| `STAMP_MAX_START_NUMBER` | 100 000 | Número inicial máximo de la numeración. |
+| `STAMP_MARGIN` | 28 pt | Distancia de los números de página al borde. |
+| `MAX_METADATA_LENGTH` | 500 | Longitud máxima de cada campo en **Editar metadatos**. |
 
 Si una conversión o compresión supera su tiempo máximo, se termina el proceso
 externo junto con todos los procesos que haya iniciado.
@@ -179,8 +200,11 @@ de Docker.
 ## Interfaz web
 
 Cada herramienta tiene su propia página: `/` (inicio), `/merge`, `/split`,
-`/pages`, `/compress`, `/images`, `/pdf-to-images`, `/word`, `/excel` y
-`/powerpoint`.
+`/pages`, `/compress`, `/metadata`, `/protect`, `/images`, `/pdf-to-images`, `/stamp`, `/word`,
+`/excel` y `/powerpoint`.
+
+La interfaz tiene modo oscuro automático: sigue la preferencia de tema claro u
+oscuro del sistema operativo, sin necesidad de configurar nada.
 
 ## API
 
@@ -199,6 +223,11 @@ Además de la interfaz web, el servidor ofrece estos endpoints:
 | `POST` | `/api/excel-to-pdf` | Convierte un archivo `.xls` o `.xlsx`. |
 | `POST` | `/api/powerpoint-to-pdf` | Convierte un archivo `.ppt` o `.pptx`. |
 | `POST` | `/api/compress` | Comprime un PDF; `level` es `strong`, `recommended` (por defecto) o `high`. Las cabeceras `X-Original-Size`, `X-Compressed-Size` y `X-Compression-Applied` indican el resultado. |
+| `POST` | `/api/protect` | Cifra un PDF con AES-256 usando `password` (obligatoria, máximo 127 bytes). Responde `400` si el PDF ya estaba protegido. |
+| `POST` | `/api/unlock` | Quita la contraseña de un PDF protegido usando `password` (puede ir vacía si el PDF solo tiene restricciones de permisos). Responde `400` con `Contraseña incorrecta` si no coincide, o si el PDF no estaba protegido. |
+| `POST` | `/api/stamp` | Numera las páginas (`mode=numbers`, por defecto) o añade una marca de agua (`mode=watermark`). Números: `position` (`bottom-center` por defecto, `bottom-left`, `bottom-right`, `top-center`, `top-left`, `top-right`), `number_format` (`n` → `1`, `n-of-total` → `1 / N`, `page-n-of-total` → `Página 1 de N`; N es el último número), `start_number` (0-100000, por defecto 1) y `font_size` (6-72, por defecto 12). Marca de agua: `text` (obligatorio, hasta 100 caracteres), `font_size` (8-200, por defecto 60), `opacity` (0.1-1, por defecto 0.3) y `rotation` (`45` por defecto o `0`). `output_name` es opcional (`<nombre>-numerado.pdf` / `<nombre>-marca-de-agua.pdf`). |
+| `POST` | `/api/metadata/read` | Devuelve en JSON los metadatos de un PDF (`title`, `author`, `subject`, `keywords`, `creator`, `producer`, `creation_date`, `modification_date`; `null` si faltan) y su número de páginas (`pages`). |
+| `POST` | `/api/metadata` | Escribe `title`, `author`, `subject` y `keywords` (máximo 500 caracteres cada uno; un campo vacío o ausente se elimina) y quita el bloque XMP. Con `remove_all=true` elimina todos los metadatos. La descarga se llama `<nombre>-metadatos.pdf` salvo que se indique `output_name`. |
 | `POST` | `/api/documents` | Sube un PDF una sola vez y devuelve su `id` y número de páginas. |
 | `GET` | `/api/documents/{id}/pages/{n}` | Devuelve la página `n` como JPEG; `width` controla el tamaño (100-2000 px). |
 | `POST` | `/api/documents/{id}/edit` | Genera el PDF editado a partir de `pages` sin volver a subir el archivo. |
@@ -214,6 +243,17 @@ subir el archivo automáticamente.
 Los endpoints que generan archivos aceptan el campo opcional `output_name`
 para indicar el nombre de la descarga. Las peticiones de archivos usan
 `multipart/form-data`.
+
+Los errores devuelven un JSON con `detail` en español:
+
+- `400`: archivo o parámetros no válidos, o PDF protegido con contraseña (hay
+  que desbloquearlo antes; los PDF que solo tienen contraseña de propietario
+  se procesan con normalidad). El detalle técnico del error no se envía al
+  cliente: queda en el registro del servidor (`docker compose logs`).
+- `413`: un archivo supera `MAX_UPLOAD_MB` o el conjunto supera
+  `MAX_TOTAL_UPLOAD_MB`.
+- `503`: falta LibreOffice o Ghostscript. `504`: la conversión tardó demasiado.
+- `410`: el documento de **Organizar páginas** ha caducado.
 
 La documentación interactiva generada por FastAPI está disponible en
 [`/docs`](http://localhost:8000/docs) cuando el servidor está en ejecución.
@@ -259,7 +299,7 @@ requirements-dev.txt  # Dependencias para ejecutar las pruebas
 
 El servidor está configurado para uso local y para ejecutarse detrás de un
 contenedor. Antes de exponerlo públicamente conviene añadir, según el entorno,
-autenticación, límites de tamaño y frecuencia de subida, HTTPS y una política
+autenticación, límites de frecuencia de subida, HTTPS y una política
 de gestión de errores y registros. Los documentos subidos pueden contener
 información sensible: utiliza el servicio únicamente en un entorno de
 confianza y revisa la configuración de red del despliegue.
@@ -269,7 +309,9 @@ respuestas llevan cabeceras de seguridad (`Content-Security-Policy` que solo
 permite recursos del propio servidor, `X-Content-Type-Options: nosniff`,
 `X-Frame-Options: DENY` y `Referrer-Policy: no-referrer`). Los archivos de
 `/static` se sirven con `Cache-Control: no-cache` para que el navegador
-compruebe si hay una versión nueva tras reconstruir la imagen.
+compruebe si hay una versión nueva tras reconstruir la imagen. Las subidas
+tienen un tamaño máximo (`MAX_UPLOAD_MB` y `MAX_TOTAL_UPLOAD_MB`) y
+`docker-compose.yml` limita la memoria del contenedor a 1 GB (`mem_limit`).
 
 La interfaz no carga recursos externos: las fuentes Manrope y DM Mono se
 sirven desde `static/fonts/`, distribuidas bajo la SIL Open Font License, por

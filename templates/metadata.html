@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Editar metadatos | PDF Toolkit</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <main class="shell service-page">
+        <section class="intro">
+            <p class="eyebrow">SERVICIO 10 / METADATOS</p>
+            <h1>Edita los metadatos<br><em>de tus PDFs.</em></h1>
+            <p class="lede">Cambia el título, el autor, el asunto y las palabras clave, o elimínalos todos antes de compartir un documento.</p>
+        </section>
+
+        <nav class="service-back" aria-label="Navegación del servicio">
+            <a class="back-button" href="/">&#8592; Menu</a>
+        </nav>
+
+        <section class="workspace" aria-labelledby="metadata-title">
+            <div class="view-heading">
+                <h2 id="metadata-title">Documento PDF</h2>
+                <p class="view-lede">Los metadatos pueden revelar quién creó el documento, con qué programa y cuándo. Elimínalos si no quieres compartir esa información.</p>
+            </div>
+
+            <form id="metadata-form">
+                <label class="dropzone" for="metadata-input" id="metadata-dropzone">
+                    <span class="drop-icon">+</span>
+                    <span><strong>Seleccionar PDF</strong><small id="metadata-file-name">o arrástralo aquí</small></span>
+                    <input id="metadata-input" type="file" accept="application/pdf,.pdf">
+                </label>
+
+                <p id="metadata-details" class="metadata-details" hidden></p>
+
+                <label class="check-field">
+                    <input id="metadata-remove-all" type="checkbox">
+                    <span>Eliminar todos los metadatos</span>
+                </label>
+
+                <fieldset id="metadata-fields" class="metadata-fields">
+                    <label class="name-field">
+                        <span>Título</span>
+                        <input id="metadata-field-title" type="text" maxlength="500" autocomplete="off">
+                    </label>
+                    <label class="name-field">
+                        <span>Autor</span>
+                        <input id="metadata-field-author" type="text" maxlength="500" autocomplete="off">
+                    </label>
+                    <label class="name-field">
+                        <span>Asunto</span>
+                        <input id="metadata-field-subject" type="text" maxlength="500" autocomplete="off">
+                    </label>
+                    <label class="name-field">
+                        <span>Palabras clave</span>
+                        <input id="metadata-field-keywords" type="text" maxlength="500" autocomplete="off">
+                    </label>
+                </fieldset>
+
+                <label class="name-field">
+                    <span>Nombre del PDF</span>
+                    <input id="metadata-output-name" type="text" value="documento-metadatos.pdf" maxlength="120" autocomplete="off">
+                </label>
+                <button class="primary-button" type="submit">
+                    <span>Guardar y descargar</span>
+                    <span aria-hidden="true">&#8594;</span>
+                </button>
+            </form>
+            <p id="metadata-status" class="status" role="status"></p>
+        </section>
+    </main>
+    <script src="/static/common.js"></script>
+    <script src="/static/metadata.js"></script>
+</body>
+</html>
