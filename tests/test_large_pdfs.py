@@ -317,6 +317,12 @@ def test_defaults_and_environment_overrides():
         "DOCUMENT_SWEEP_SECONDS": 300,
     }
 
+    # Without MAX_TOTAL_UPLOAD_MB, the total follows a raised per-file limit.
+    raised = import_settings(MAX_UPLOAD_MB="1500")
+    assert raised.returncode == 0, raised.stderr
+    raised_values = json.loads(raised.stdout)
+    assert (raised_values["MAX_UPLOAD_MB"], raised_values["MAX_TOTAL_UPLOAD_MB"]) == (1500, 1500)
+
     custom = import_settings(MAX_UPLOAD_MB="800", MAX_TOTAL_UPLOAD_MB="2000", COMPRESSION_SECONDS_PER_PAGE="5")
     assert custom.returncode == 0, custom.stderr
     values = json.loads(custom.stdout)

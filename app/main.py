@@ -63,7 +63,8 @@ MAX_RENDER_WIDTH = 2000
 # They stop accidents and abuse, not big documents: a 1000-page scan is
 # usually a few hundred MB.
 MAX_UPLOAD_MB = env_int("MAX_UPLOAD_MB", 500, 1, 100_000)
-MAX_TOTAL_UPLOAD_MB = env_int("MAX_TOTAL_UPLOAD_MB", 1000, 1, 100_000)
+# Unset, the total follows a raised per-file limit instead of stopping startup.
+MAX_TOTAL_UPLOAD_MB = env_int("MAX_TOTAL_UPLOAD_MB", max(1000, MAX_UPLOAD_MB), 1, 100_000)
 if MAX_TOTAL_UPLOAD_MB < MAX_UPLOAD_MB:
     raise ValueError(
         f"MAX_TOTAL_UPLOAD_MB ({MAX_TOTAL_UPLOAD_MB}) no puede ser menor que MAX_UPLOAD_MB ({MAX_UPLOAD_MB})."

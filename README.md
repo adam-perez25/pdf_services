@@ -186,7 +186,7 @@ variable falla.
 | Variable de entorno | Por defecto | Rango | Descripción |
 | --- | --- | --- | --- |
 | `MAX_UPLOAD_MB` | 500 MB | 1-100000 | Tamaño máximo de cada archivo subido; si se supera responde `413`. |
-| `MAX_TOTAL_UPLOAD_MB` | 1000 MB | 1-100000 | Tamaño máximo de todos los archivos de una petición (**Unir PDF**, **Imágenes a PDF**); si se supera responde `413`. No puede ser menor que `MAX_UPLOAD_MB`. |
+| `MAX_TOTAL_UPLOAD_MB` | 1000 MB | 1-100000 | Tamaño máximo de todos los archivos de una petición (**Unir PDF**, **Imágenes a PDF**); si se supera responde `413`. No puede ser menor que `MAX_UPLOAD_MB`; si no se indica, vale 1000 o `MAX_UPLOAD_MB` si este es mayor. |
 | `OFFICE_TIMEOUT_SECONDS` | 300 s | 10-86400 | Tiempo máximo de una conversión con LibreOffice; si se supera responde `504`. |
 | `COMPRESSION_TIMEOUT_SECONDS` | 600 s | 10-86400 | Tiempo base de la compresión con Ghostscript. |
 | `COMPRESSION_SECONDS_PER_PAGE` | 2 s | 0-600 | Tiempo extra por página: el límite es base + páginas × este valor (20 páginas: 640 s; 1000 páginas: 2600 s). Si se supera responde `504`. |
