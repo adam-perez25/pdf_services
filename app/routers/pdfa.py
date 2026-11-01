@@ -6,10 +6,10 @@ import shutil
 import subprocess
 import tempfile
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from starlette.background import BackgroundTask
 
-from app import config, external_tools, heavy_jobs
+from app import cancellation, config, external_tools, heavy_jobs
 from app.documents import protect_from_sweeper
 from app.errors import processing_error
 from app.heavy_jobs import job_estimate_mb
@@ -79,7 +79,7 @@ def count_pages(path: Path, damaged_ok: bool) -> int | None:
 
 
 def ghostscript_rewrite(
-    file: UploadFile, output_name: str, kind: str, suffix: str, options: list[str], timeout_message: str,
+    request: Request, file: UploadFile, output_name: str, kind: str, suffix: str, options: list[str], timeout_message: str,
     failure_message: str, damaged_ok: bool, pdfa_part: str | None = None, profile: Path | None = None,
 ):
     """Run `file` through Ghostscript's pdfwrite and stream the new PDF."""
@@ -91,7 +91,8 @@ def ghostscript_rewrite(
         output_path.unlink(missing_ok=True)
 
     try:
-        with heavy_jobs.heavy_job(job_estimate_mb(kind, upload_size(file)), [file]), \
+        with cancellation.cancellable_job(request), \
+                heavy_jobs.heavy_job(job_estimate_mb(kind, upload_size(file)), [file]), \
                 protect_from_sweeper(input_path, output_path), \
                 tempfile.TemporaryDirectory(prefix="pdf-toolkit-gs-") as scratch:
             with input_path.open("wb") as destination:
@@ -156,6 +157,7 @@ def check_pdf_upload(file: UploadFile) -> None:
 
 @router.post("/api/pdfa")
 def convert_to_pdfa(
+    request: Request,
     file: UploadFile = File(...),
     part: str = Form(PDFA_DEFAULT_PART),
     output_name: str = Form(""),
@@ -173,7 +175,7 @@ def convert_to_pdfa(
         file.file.close()
         raise HTTPException(status_code=503, detail=PDFA_MISSING_PROFILE_MESSAGE)
     return ghostscript_rewrite(
-        file, output_name, "pdfa", "-pdfa",
+        request, file, output_name, "pdfa", "-pdfa",
         [
             f"-dPDFA={part}",
             # Drop what PDF/A forbids (transparency in part 1, JavaScript...) instead of failing.
@@ -190,6 +192,7 @@ def convert_to_pdfa(
 
 @router.post("/api/repair")
 def repair_pdf(
+    request: Request,
     file: UploadFile = File(...),
     output_name: str = Form(""),
 ):
@@ -199,7 +202,7 @@ def repair_pdf(
         file.file.close()
         raise HTTPException(status_code=503, detail="Ghostscript no está instalado o no está disponible en el PATH.")
     return ghostscript_rewrite(
-        file, output_name, "repair", "-reparado",
+        request, file, output_name, "repair", "-reparado",
         [],
         timeout_message="La reparación tardó demasiado.",
         failure_message=REPAIR_FAILED_MESSAGE,

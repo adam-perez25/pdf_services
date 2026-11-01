@@ -216,3 +216,21 @@ def test_the_page_sends_the_header_and_route_the_server_expects():
     script = (config.BASE_DIR / "static" / "common.js").read_text(encoding="utf-8")
     assert f'"{cancellation.JOB_ID_HEADER}"' in script
     assert "/api/jobs/${jobId}/cancel" in script
+
+
+@pytest.mark.parametrize("path", ["/api/pdfa", "/api/repair"])
+def test_cancelled_pdfa_and_repair_remove_their_files(client, documents_dir, tmp_path, monkeypatch, path):
+    profile = tmp_path / "default_rgb.icc"
+    profile.write_bytes(b"icc")
+
+    def cancelled_tool(command, timeout, env=None):
+        raise JobCancelled()
+
+    monkeypatch.setattr(external_tools, "find_ghostscript", lambda: "gs")
+    monkeypatch.setattr(external_tools, "find_srgb_profile", lambda: profile)
+    monkeypatch.setattr(external_tools, "run_tool", cancelled_tool)
+
+    response = client.post(path, files={"file": ("a.pdf", make_pdf(2))})
+
+    assert response.status_code == 499
+    assert list(documents_dir.iterdir()) == []
