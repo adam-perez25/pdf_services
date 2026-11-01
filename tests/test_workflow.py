@@ -57,6 +57,17 @@ def test_script_is_served(client):
     assert "STEP_DEFINITIONS" in response.text
 
 
+def all_routes(routes):
+    """The app's routes, including those of the tool routers: FastAPI keeps an
+    included APIRouter as one entry that holds the router (original_router)."""
+    for route in routes:
+        included = getattr(route, "original_router", None)
+        if included is not None:
+            yield from all_routes(included.routes)
+        else:
+            yield route
+
+
 def test_script_only_calls_existing_endpoints():
     # Commented lines (the OCR example) do not count.
     code = "\n".join(
@@ -65,7 +76,7 @@ def test_script_only_calls_existing_endpoints():
     )
     endpoints = set(re.findall(r'"(/api/[^"]+)"', code))
     registered = {
-        route.path for route in main.app.routes if "POST" in (getattr(route, "methods", None) or set())
+        route.path for route in all_routes(main.app.routes) if "POST" in (getattr(route, "methods", None) or set())
     }
 
     assert {"/api/merge", "/api/stamp", "/api/metadata", "/api/compress", "/api/protect"} <= endpoints

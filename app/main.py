@@ -19,11 +19,18 @@ import zipfile
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, ImageSequence, UnidentifiedImageError
 from pypdf import PageObject, PdfReader, PdfWriter
-from pypdf.generic import DecodedStreamObject, DictionaryObject, FloatObject, NameObject, TextStringObject
+from pypdf.generic import (
+    DecodedStreamObject,
+    DictionaryObject,
+    FloatObject,
+    NameObject,
+    NumberObject,
+    TextStringObject,
+)
 import pypdfium2
 from starlette.background import BackgroundTask
 
@@ -40,7 +47,12 @@ from app.documents import (
 from app.errors import encrypted_pdf, logger, processing_error
 from app.heavy_jobs import decoded_image_mb, job_estimate_mb
 from app.image_helpers import ALLOWED_IMAGE_FORMATS, IMAGE_MAX_PIXELS, IMAGE_TOO_BIG_MESSAGE, image_pixels
-from app.middleware import CrossSiteRequestGuard, UploadSizeLimit, add_security_headers, revalidate_static_files
+from app.middleware import (
+    CrossSiteRequestGuard,
+    UploadSizeLimit,
+    add_security_headers,
+    revalidate_static_files,
+)
 from app.pdf_helpers import (
     PDFIUM_LOCK,
     check_page_list_total,
@@ -54,6 +66,7 @@ from app.pdf_helpers import (
     strip_before_pdf_header,
     visible_page_box,
 )
+from app.routers import health, html_pages
 from app.uploads import (
     check_upload_sizes,
     clean_base_name,
@@ -114,96 +127,9 @@ app.mount("/static", StaticFiles(directory=config.BASE_DIR / "static"), name="st
 app.middleware("http")(revalidate_static_files)
 app.middleware("http")(add_security_headers)
 
-
-@app.get("/", response_class=HTMLResponse)
-async def home():
-    return render_page("index.html")
-
-
-@app.get("/merge", response_class=HTMLResponse)
-async def merge_page():
-    return render_page("merge.html")
-
-
-@app.get("/split", response_class=HTMLResponse)
-async def split_page():
-    return render_page("split.html")
-
-
-@app.get("/images", response_class=HTMLResponse)
-async def images_page():
-    return render_page("images.html")
-
-
-@app.get("/word", response_class=HTMLResponse)
-async def word_page():
-    return render_page("word.html")
-
-
-@app.get("/excel", response_class=HTMLResponse)
-async def excel_page():
-    return render_page("excel.html")
-
-
-@app.get("/powerpoint", response_class=HTMLResponse)
-async def powerpoint_page():
-    return render_page("powerpoint.html")
-
-
-@app.get("/pages", response_class=HTMLResponse)
-async def pages_page():
-    return render_page("pages.html")
-
-
-@app.get("/compress", response_class=HTMLResponse)
-async def compress_page():
-    return render_page("compress.html")
-
-
-@app.get("/pdf-to-images", response_class=HTMLResponse)
-async def pdf_to_images_page():
-    return render_page("pdf-to-images.html")
-
-
-@app.get("/protect", response_class=HTMLResponse)
-async def protect_page():
-    return render_page("protect.html")
-
-
-@app.get("/metadata", response_class=HTMLResponse)
-async def metadata_page():
-    return render_page("metadata.html")
-
-
-@app.get("/health")
-def health():
-    # Used by the Docker HEALTHCHECK. The service is unhealthy only if it cannot
-    # store uploads; a missing LibreOffice or Ghostscript is reported but only
-    # disables the Office conversions or Compress PDF.
-    try:
-        config.DOCUMENTS_DIR.mkdir(exist_ok=True)
-        with tempfile.NamedTemporaryFile(dir=config.DOCUMENTS_DIR, prefix=".health-"):
-            pass
-        storage_ok = True
-    except OSError:
-        storage_ok = False
-
-    return JSONResponse(
-        status_code=200 if storage_ok else 503,
-        content={
-            "status": "ok" if storage_ok else "error",
-            "storage": storage_ok,
-            "libreoffice": external_tools.find_soffice() is not None,
-            "ghostscript": external_tools.find_ghostscript() is not None,
-            "ocr": external_tools.ocr_available(),
-            "heavy_jobs": heavy_jobs.HEAVY_JOBS.status(),
-        },
-    )
-
-
-def render_page(template_name: str) -> HTMLResponse:
-    html = (config.BASE_DIR / "templates" / template_name).read_text(encoding="utf-8")
-    return HTMLResponse(html)
+# Routers (one per tool), included in this order.
+app.include_router(html_pages.router)
+app.include_router(health.router)
 
 
 # The file-processing endpoints are plain functions, not async: FastAPI runs
@@ -1477,11 +1403,6 @@ def stamp_overlay(page: PageObject, drawing: str, opacity: float = 1.0) -> PageO
     return overlay
 
 
-@app.get("/stamp", response_class=HTMLResponse)
-async def stamp_page():
-    return render_page("stamp.html")
-
-
 @app.post("/api/stamp")
 def stamp_pdf(
     file: UploadFile = File(...),
@@ -1766,13 +1687,6 @@ def edit_metadata(
     return file_download(output_path, filename)
 
 
-# Flujo de trabajo: the chaining runs in the browser (static/workflow.js), which
-# calls the existing /api endpoints one after another, so only the page lives here.
-@app.get("/workflow", response_class=HTMLResponse)
-async def workflow_page():
-    return render_page("workflow.html")
-
-
 # Extract text (PDF to TXT). The text is streamed page by page into a file in
 # the documents folder, so a big document never becomes one huge string.
 TEXT_SEPARATORS = {"none", "formfeed", "header"}
@@ -1780,11 +1694,6 @@ EMPTY_TEXT_MESSAGE = (
     "No se encontró texto en el PDF. Probablemente es un documento escaneado: "
     "pásalo primero por la herramienta OCR (/ocr) y vuelve a intentarlo."
 )
-
-
-@app.get("/extract-text", response_class=HTMLResponse)
-async def extract_text_page():
-    return render_page("extract-text.html")
 
 
 def clean_text_output_name(output_name: str, default: str) -> str:
@@ -1912,10 +1821,7 @@ def extract_text(
 # --- Firmar PDF (visual signature) -------------------------------------------
 # Places a drawn or uploaded signature image on pages of a document already in
 # the organizer's store. It is only a picture on the page, not a cryptographic
-# (digital) signature. Imports kept here so the whole tool is one block.
-from PIL import ImageOps  # noqa: E402
-from pypdf.generic import NumberObject  # noqa: E402
-
+# (digital) signature.
 SIGNATURE_IMAGE_FORMATS = ["PNG", "JPEG"]
 SIGNATURE_MAX_MB = 10
 SIGNATURE_MAX_SOURCE_PIXELS = 40_000_000
@@ -1923,11 +1829,6 @@ SIGNATURE_MAX_SIDE = 2000
 SIGNATURE_MAX_PLACEMENTS = 200
 # Boxes may overshoot the page edge by this much (rounding in the browser).
 SIGNATURE_TOLERANCE = 0.001
-
-
-@app.get("/sign", response_class=HTMLResponse)
-async def sign_page():
-    return render_page("sign.html")
 
 
 SIGNATURE_INVALID_MESSAGE = "La firma debe ser una imagen PNG o JPEG."
@@ -2242,11 +2143,6 @@ def ocr_command(
         str(input_path),
         str(output_path),
     ]
-
-
-@app.get("/ocr", response_class=HTMLResponse)
-async def ocr_page():
-    return render_page("ocr.html")
 
 
 @app.post("/api/ocr")
