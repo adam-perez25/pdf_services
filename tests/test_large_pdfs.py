@@ -17,6 +17,8 @@ import app.main as main
 import app.config as config
 import app.documents as documents
 import app.external_tools as external_tools
+import app.pdf_helpers as pdf_helpers
+import app.routers.split as split_router
 import app.uploads as uploads
 
 
@@ -184,7 +186,7 @@ def test_pdf_to_images_long_pdf_over_the_pixel_cap_is_rejected_up_front(
 ):
     monkeypatch.setattr(config, "PDF_TO_IMAGES_MAX_MEGAPIXELS", 1000)
     rendered = []
-    monkeypatch.setattr(main.pypdfium2.PdfPage, "render", lambda *args, **kwargs: rendered.append(1))
+    monkeypatch.setattr(pdf_helpers.pypdfium2.PdfPage, "render", lambda *args, **kwargs: rendered.append(1))
 
     response = client.post("/api/pdf-to-images", files=upload(large_pdf), data={"dpi": "300"})
 
@@ -262,7 +264,7 @@ def test_slow_split_zip_survives_a_sweep(client, large_pdf, documents_dir, monke
         assert len(zips) == 1 and zips[0] in documents.ACTIVE_JOB_FILES
         return path
 
-    monkeypatch.setattr(uploads, "write_pdf_to_file", write_then_sweep)
+    monkeypatch.setattr(split_router, "write_pdf_to_file", write_then_sweep)
     response = client.post(
         "/api/split-zip",
         files=upload(large_pdf),

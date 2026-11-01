@@ -10,6 +10,7 @@ import pytest
 import app.main as main
 import app.config as config
 import app.documents as documents
+import app.routers.pages as pages_router
 from conftest import page_layout
 
 
@@ -42,10 +43,10 @@ def test_page_image_is_cacheable_jpeg(client, sample_pdf):
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/jpeg"
     assert response.headers["cache-control"] == "private, max-age=3600"
-    assert Image.open(BytesIO(response.content)).width == main.THUMBNAIL_WIDTH
+    assert Image.open(BytesIO(response.content)).width == pages_router.THUMBNAIL_WIDTH
 
 
-@pytest.mark.parametrize("requested, expected", [(10, main.MIN_RENDER_WIDTH), (99999, 800)])
+@pytest.mark.parametrize("requested, expected", [(10, pages_router.MIN_RENDER_WIDTH), (99999, 800)])
 def test_page_image_width_is_clamped(client, sample_pdf, requested, expected):
     # Page 2 is 200 points wide; the render scale is capped at 4x (800 px).
     document_id = upload(client, sample_pdf)

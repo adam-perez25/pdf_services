@@ -21,6 +21,9 @@ import app.heavy_jobs as heavy_jobs
 import app.image_helpers as image_helpers
 import app.middleware as middleware
 import app.pdf_helpers as pdf_helpers
+import app.routers.extract_text as extract_text_router
+import app.routers.pages as pages_router
+import app.routers.split as split_router
 import app.uploads as uploads
 from conftest import make_pdf, make_png
 
@@ -222,7 +225,7 @@ def test_extract_text_caps_repeated_ranges(client, documents_dir):
     # Within the cap the repeated ranges get past the check (these pages
     # have no text, hence the "no text" answer).
     allowed = extract(",".join(["1-4"] * 25))
-    assert allowed.json()["detail"] == main.EMPTY_TEXT_MESSAGE
+    assert allowed.json()["detail"] == extract_text_router.EMPTY_TEXT_MESSAGE
     assert list(documents_dir.iterdir()) == []
 
 
@@ -237,9 +240,9 @@ def test_split_zip_caps_ranges(client, monkeypatch):
     assert "máximo para este PDF es 100" in total.json()["detail"]
 
     monkeypatch.setattr(pdf_helpers, "PAGE_LIST_MIN_LIMIT", 10_000)
-    count = split(",".join(["1"] * (main.SPLIT_MAX_RANGES + 1)))
+    count = split(",".join(["1"] * (split_router.SPLIT_MAX_RANGES + 1)))
     assert count.status_code == 400
-    assert f"{main.SPLIT_MAX_RANGES} rangos" in count.json()["detail"]
+    assert f"{split_router.SPLIT_MAX_RANGES} rangos" in count.json()["detail"]
 
     monkeypatch.setattr(pdf_helpers, "PAGE_LIST_MIN_LIMIT", 100)
     normal = split("1-2, 3-4")
@@ -271,12 +274,12 @@ def test_organizer_edit_caps_layout(client):
 # --- 4. Thumbnail pixel cap -------------------------------------------------------
 
 def test_thumbnail_scale_is_capped():
-    scale = main.thumbnail_scale(500, 200_000, 2000)
-    assert 500 * scale * 200_000 * scale <= main.THUMBNAIL_MAX_PIXELS * 1.001
-    assert 200_000 * scale <= main.THUMBNAIL_MAX_SIDE + 1
+    scale = pages_router.thumbnail_scale(500, 200_000, 2000)
+    assert 500 * scale * 200_000 * scale <= pages_router.THUMBNAIL_MAX_PIXELS * 1.001
+    assert 200_000 * scale <= pages_router.THUMBNAIL_MAX_SIDE + 1
     # Ordinary pages are unchanged: width / page width, at most 4x.
-    assert main.thumbnail_scale(595, 842, 300) == pytest.approx(300 / 595)
-    assert main.thumbnail_scale(100, 100, 2000) == main.THUMBNAIL_MAX_SCALE
+    assert pages_router.thumbnail_scale(595, 842, 300) == pytest.approx(300 / 595)
+    assert pages_router.thumbnail_scale(100, 100, 2000) == pages_router.THUMBNAIL_MAX_SCALE
 
 
 def test_huge_page_thumbnail_is_bounded(client):
@@ -290,8 +293,8 @@ def test_huge_page_thumbnail_is_bounded(client):
 
     assert response.status_code == 200
     with Image.open(BytesIO(response.content)) as image:
-        assert image.width * image.height <= main.THUMBNAIL_MAX_PIXELS * 1.01
-        assert max(image.size) <= main.THUMBNAIL_MAX_SIDE + 1
+        assert image.width * image.height <= pages_router.THUMBNAIL_MAX_PIXELS * 1.01
+        assert max(image.size) <= pages_router.THUMBNAIL_MAX_SIDE + 1
 
 
 # --- 5. Image decompression bombs ---------------------------------------------------
@@ -425,7 +428,7 @@ def test_output_names_are_capped(client):
     long_name = "a" * 5000
     assert uploads.clean_output_name(long_name) == "a" * uploads.MAX_OUTPUT_NAME_LENGTH + ".pdf"
     assert uploads.clean_output_name(long_name + ".pdf") == "a" * uploads.MAX_OUTPUT_NAME_LENGTH + ".pdf"
-    assert main.clean_text_output_name(long_name, "texto") == "a" * uploads.MAX_OUTPUT_NAME_LENGTH + ".txt"
+    assert extract_text_router.clean_text_output_name(long_name, "texto") == "a" * uploads.MAX_OUTPUT_NAME_LENGTH + ".txt"
     assert uploads.clean_output_name("informe.pdf") == "informe.pdf"
 
     response = client.post("/api/merge", files=[("files", ("a.pdf", make_pdf(1)))], data={"output_name": long_name})

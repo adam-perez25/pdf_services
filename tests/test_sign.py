@@ -9,6 +9,7 @@ import pytest
 import app.main as main
 import app.external_tools as external_tools
 import app.pdf_helpers as pdf_helpers
+import app.routers.sign as sign_router
 from conftest import make_pdf, make_png
 
 
@@ -190,7 +191,7 @@ def test_large_signature_is_scaled_down(client):
     reader = PdfReader(BytesIO(response.content))
     xobject = reader.pages[0]["/Resources"]["/XObject"]
     image = next(iter(xobject.values())).get_object()
-    assert max(image["/Width"], image["/Height"]) == main.SIGNATURE_MAX_SIDE
+    assert max(image["/Width"], image["/Height"]) == sign_router.SIGNATURE_MAX_SIDE
 
 
 @pytest.mark.parametrize(
@@ -254,7 +255,7 @@ def test_page_out_of_range(client, page):
 
 def test_too_many_placements(client):
     document_id = upload(client, blank_pdf([0]))
-    placements = [{"page": 1, **BOX}] * (main.SIGNATURE_MAX_PLACEMENTS + 1)
+    placements = [{"page": 1, **BOX}] * (sign_router.SIGNATURE_MAX_PLACEMENTS + 1)
     response = sign(client, document_id, placements)
     assert response.status_code == 400
 
@@ -286,7 +287,7 @@ def test_eps_signature_rejected(client, monkeypatch):
 
 def test_oversized_signature_rejected(client, monkeypatch):
     document_id = upload(client, blank_pdf([0]))
-    monkeypatch.setattr(main, "SIGNATURE_MAX_MB", 0.0001)
+    monkeypatch.setattr(sign_router, "SIGNATURE_MAX_MB", 0.0001)
     response = sign(client, document_id, [{"page": 1, **BOX}], signature=make_png())
     assert response.status_code == 413
 

@@ -7,6 +7,7 @@ from pypdf import PdfReader, PdfWriter
 import pytest
 
 import app.main as main
+import app.routers.stamp as stamp_router
 from conftest import make_pdf
 
 
@@ -187,23 +188,23 @@ def test_page_route(client):
     assert "/static/stamp.js" in response.text
 
 
-@pytest.mark.parametrize("position", sorted(main.STAMP_POSITIONS))
+@pytest.mark.parametrize("position", sorted(stamp_router.STAMP_POSITIONS))
 def test_long_page_numbers_stay_inside_narrow_pages(position):
     # "Página 100000 de 100099" at 72 pt is far wider than a 120 pt page.
     label = "Página 100000 de 100099"
     width, height = 120.0, 400.0
-    stream = main.number_stream(label, 72, position, width, height)
+    stream = stamp_router.number_stream(label, 72, position, width, height)
 
     size, x, y = (float(v) for v in re.search(r"/StampFont (\S+) Tf 0 g (\S+) (\S+) Td", stream).groups())
-    margin = min(main.STAMP_MARGIN, min(width, height) * 0.08)
+    margin = min(stamp_router.STAMP_MARGIN, min(width, height) * 0.08)
     assert size < 72
     assert x >= margin - 0.01
-    assert x + main.helvetica_width(label, size) <= width - margin + 0.01
+    assert x + stamp_router.helvetica_width(label, size) <= width - margin + 0.01
     assert margin - 0.01 <= y <= height - margin - size * 0.718 + 0.01
 
 
 def test_huge_number_font_fits_short_page():
-    stream = main.number_stream("7", 72, "top-center", 300.0, 60.0)
+    stream = stamp_router.number_stream("7", 72, "top-center", 300.0, 60.0)
     size, _, y = (float(v) for v in re.search(r"/StampFont (\S+) Tf 0 g (\S+) (\S+) Td", stream).groups())
     assert y >= 0 and y + size * 0.718 <= 60.0
 
@@ -212,10 +213,10 @@ def test_huge_number_font_fits_short_page():
 def test_descenders_are_not_clipped_on_short_pages(position):
     # "Página" has a descender (g); on a 40 pt strip the whole glyph box,
     # from the descender to the cap height, must stay on the page.
-    stream = main.number_stream("Página 1 de 9", 72, position, 600.0, 40.0)
+    stream = stamp_router.number_stream("Página 1 de 9", 72, position, 600.0, 40.0)
     size, _, y = (float(v) for v in re.search(r"/StampFont (\S+) Tf 0 g (\S+) (\S+) Td", stream).groups())
-    assert y - size * main.HELVETICA_DESCENDER >= -0.01
-    assert y + size * main.HELVETICA_CAP_HEIGHT <= 40.01
+    assert y - size * stamp_router.HELVETICA_DESCENDER >= -0.01
+    assert y + size * stamp_router.HELVETICA_CAP_HEIGHT <= 40.01
 
 
 def test_rendered_descender_stays_on_a_short_page(client):
@@ -235,11 +236,11 @@ def test_rendered_descender_stays_on_a_short_page(client):
 @pytest.mark.parametrize(("rotation", "width", "height"), [(0, 600, 40), (45, 600, 60), (45, 60, 600)])
 def test_watermark_fits_the_page_height_too(rotation, width, height):
     text = "BORRADOR"
-    stream = main.watermark_stream(text, 200, rotation, width, height)
+    stream = stamp_router.watermark_stream(text, 200, rotation, width, height)
     size = float(re.search(r"/StampFont (\S+) Tf", stream).group(1))
     angle = math.radians(rotation)
-    text_width = main.helvetica_width(text, size)
-    text_height = size * (main.HELVETICA_CAP_HEIGHT + main.HELVETICA_DESCENDER)
+    text_width = stamp_router.helvetica_width(text, size)
+    text_height = size * (stamp_router.HELVETICA_CAP_HEIGHT + stamp_router.HELVETICA_DESCENDER)
     box_width = text_width * math.cos(angle) + text_height * math.sin(angle)
     box_height = text_width * math.sin(angle) + text_height * math.cos(angle)
     assert box_width <= 0.9 * width + 0.01
