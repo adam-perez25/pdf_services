@@ -7,7 +7,10 @@ from fastapi.testclient import TestClient
 from PIL import Image
 import pytest
 
+import app.config as config
+import app.documents as documents
 import app.main as main
+import app.routers.pages as pages_router
 from conftest import page_layout
 
 
@@ -40,10 +43,10 @@ def test_page_image_is_cacheable_jpeg(client, sample_pdf):
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/jpeg"
     assert response.headers["cache-control"] == "private, max-age=3600"
-    assert Image.open(BytesIO(response.content)).width == main.THUMBNAIL_WIDTH
+    assert Image.open(BytesIO(response.content)).width == pages_router.THUMBNAIL_WIDTH
 
 
-@pytest.mark.parametrize("requested, expected", [(10, main.MIN_RENDER_WIDTH), (99999, 800)])
+@pytest.mark.parametrize("requested, expected", [(10, pages_router.MIN_RENDER_WIDTH), (99999, 800)])
 def test_page_image_width_is_clamped(client, sample_pdf, requested, expected):
     # Page 2 is 200 points wide; the render scale is capped at 4x (800 px).
     document_id = upload(client, sample_pdf)
@@ -119,10 +122,10 @@ def test_delete_document(client, sample_pdf, documents_dir):
 
 def test_expired_documents_are_swept(client, sample_pdf, documents_dir):
     old_id, recent_id = upload(client, sample_pdf), upload(client, sample_pdf)
-    old = time.time() - main.DOCUMENT_TTL_SECONDS - 1
+    old = time.time() - config.DOCUMENT_TTL_SECONDS - 1
     os.utime(documents_dir / f"{old_id}.pdf", (old, old))
 
-    main.remove_expired_documents()
+    documents.remove_expired_documents()
 
     assert not (documents_dir / f"{old_id}.pdf").exists()
     assert (documents_dir / f"{recent_id}.pdf").exists()
@@ -130,7 +133,7 @@ def test_expired_documents_are_swept(client, sample_pdf, documents_dir):
 
 def test_startup_purges_leftovers(documents_dir, monkeypatch):
     (documents_dir / f"{'a' * 32}.pdf").write_bytes(b"left from a previous run")
-    monkeypatch.setattr(main, "DOCUMENT_SWEEP_SECONDS", 3600)
+    monkeypatch.setattr(config, "DOCUMENT_SWEEP_SECONDS", 3600)
 
     with TestClient(main.app):
         assert list(documents_dir.iterdir()) == []

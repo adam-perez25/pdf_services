@@ -4,7 +4,7 @@ from io import BytesIO
 
 import pytest
 
-import app.main as main
+import app.external_tools as external_tools
 from conftest import make_pdf, make_png, page_layout
 
 
@@ -196,14 +196,14 @@ def test_word_rejects_other_extensions(client):
 
 
 def test_word_reports_missing_libreoffice(client, monkeypatch):
-    monkeypatch.setattr(main, "find_soffice", lambda: None)
+    monkeypatch.setattr(external_tools, "find_soffice", lambda: None)
 
     response = client.post("/api/word-to-pdf", files={"file": ("a.docx", make_docx("Hola"))})
 
     assert response.status_code == 503
 
 
-@pytest.mark.skipif(main.find_soffice() is None, reason="LibreOffice is not installed")
+@pytest.mark.skipif(external_tools.find_soffice() is None, reason="LibreOffice is not installed")
 def test_word_converts_docx(client):
     response = client.post("/api/word-to-pdf", files={"file": ("a.docx", make_docx("Hola"))})
 

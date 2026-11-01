@@ -6,11 +6,12 @@ from openpyxl import Workbook
 from pptx import Presentation
 import pytest
 
-import app.main as main
+import app.external_tools as external_tools
+import app.routers.office as office_router
 from conftest import make_pdf, page_layout
 
 
-needs_libreoffice = pytest.mark.skipif(main.find_soffice() is None, reason="LibreOffice is not installed")
+needs_libreoffice = pytest.mark.skipif(external_tools.find_soffice() is None, reason="LibreOffice is not installed")
 
 
 def make_xlsx(sheet_count: int) -> bytes:
@@ -56,7 +57,7 @@ def test_office_rejects_other_extensions(client, endpoint, filename):
     [("/api/excel-to-pdf", "a.xlsx"), ("/api/powerpoint-to-pdf", "a.pptx")],
 )
 def test_office_reports_missing_libreoffice(client, monkeypatch, endpoint, filename):
-    monkeypatch.setattr(main, "find_soffice", lambda: None)
+    monkeypatch.setattr(external_tools, "find_soffice", lambda: None)
 
     response = client.post(endpoint, files={"file": (filename, b"PK\x03\x04content")})
 
@@ -73,7 +74,7 @@ def test_office_reports_missing_libreoffice(client, monkeypatch, endpoint, filen
     ],
 )
 def test_office_rejects_empty_files(client, monkeypatch, endpoint, filename):
-    monkeypatch.setattr(main, "find_soffice", lambda: "/usr/bin/soffice")
+    monkeypatch.setattr(external_tools, "find_soffice", lambda: "/usr/bin/soffice")
 
     response = client.post(endpoint, files={"file": (filename, b"")})
 
@@ -93,8 +94,8 @@ def test_office_rejects_packages_that_are_not_zip_or_ole(client, monkeypatch, en
     def no_libreoffice(*args, **kwargs):
         raise AssertionError("LibreOffice must not run")
 
-    monkeypatch.setattr(main, "find_soffice", lambda: "/usr/bin/soffice")
-    monkeypatch.setattr(main, "run_tool", no_libreoffice)
+    monkeypatch.setattr(external_tools, "find_soffice", lambda: "/usr/bin/soffice")
+    monkeypatch.setattr(external_tools, "run_tool", no_libreoffice)
 
     response = client.post(endpoint, files={"file": (filename, b"hello, this is plain text")})
 
@@ -119,8 +120,8 @@ def test_office_accepts_zip_ole_and_legacy_content(client, monkeypatch, document
         (outdir / "source.pdf").write_bytes(make_pdf(1))
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr(main, "find_soffice", lambda: "/usr/bin/soffice")
-    monkeypatch.setattr(main, "run_tool", fake_soffice)
+    monkeypatch.setattr(external_tools, "find_soffice", lambda: "/usr/bin/soffice")
+    monkeypatch.setattr(external_tools, "run_tool", fake_soffice)
 
     response = client.post("/api/word-to-pdf", files={"file": (filename, content)})
 
@@ -135,8 +136,8 @@ def test_default_name_comes_from_the_uploaded_file(client, monkeypatch, document
         (outdir / "source.pdf").write_bytes(make_pdf(1))
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr(main, "find_soffice", lambda: "/usr/bin/soffice")
-    monkeypatch.setattr(main, "run_tool", fake_soffice)
+    monkeypatch.setattr(external_tools, "find_soffice", lambda: "/usr/bin/soffice")
+    monkeypatch.setattr(external_tools, "run_tool", fake_soffice)
     data = {} if output_name is None else {"output_name": output_name}
 
     response = client.post("/api/word-to-pdf", files={"file": ("Informe año ñ.docx", b"PK\x03\x04x")}, data=data)
@@ -154,7 +155,7 @@ def test_office_pages_prefill_the_name_from_the_file():
     assert "officeOutputName.value = `${file.name" in script
     for page in ("word", "excel", "powerpoint"):
         html = (root / "templates" / f"{page}.html").read_text(encoding="utf-8")
-        assert not any(old in html for old in main.OFFICE_OLD_DEFAULT_NAMES)
+        assert not any(old in html for old in office_router.OFFICE_OLD_DEFAULT_NAMES)
 
 
 @needs_libreoffice

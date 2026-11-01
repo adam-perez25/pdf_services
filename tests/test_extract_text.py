@@ -4,7 +4,7 @@ from pypdf import PdfReader, PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 import pytest
 
-import app.main as main
+import app.errors as errors
 from conftest import make_pdf
 
 
@@ -137,7 +137,7 @@ def test_encrypted_pdf_is_rejected(client, documents_dir):
     response = extract(client, output.getvalue())
 
     assert response.status_code == 400
-    assert response.json()["detail"] == main.ENCRYPTED_PDF_MESSAGE
+    assert response.json()["detail"] == errors.ENCRYPTED_PDF_MESSAGE
     assert list(documents_dir.iterdir()) == []
 
 

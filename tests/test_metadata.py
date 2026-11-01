@@ -3,7 +3,7 @@ from io import BytesIO
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import DecodedStreamObject, NameObject
 
-import app.main as main
+import app.routers.metadata as metadata_router
 from conftest import make_pdf
 
 XMP = b"""<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
@@ -129,17 +129,17 @@ def test_custom_output_name(client):
 
 
 def test_too_long_field_is_rejected(client):
-    response = edit(client, make_pdf(1), title="x" * (main.MAX_METADATA_LENGTH + 1))
+    response = edit(client, make_pdf(1), title="x" * (metadata_router.MAX_METADATA_LENGTH + 1))
 
     assert response.status_code == 400
     assert "500" in response.json()["detail"]
 
 
 def test_too_long_field_is_named_in_spanish(client):
-    response = edit(client, make_pdf(1), keywords="x" * (main.MAX_METADATA_LENGTH + 1))
+    response = edit(client, make_pdf(1), keywords="x" * (metadata_router.MAX_METADATA_LENGTH + 1))
 
     assert response.json()["detail"] == (
-        f"El campo «Palabras clave» no puede superar {main.MAX_METADATA_LENGTH} caracteres."
+        f"El campo «Palabras clave» no puede superar {metadata_router.MAX_METADATA_LENGTH} caracteres."
     )
 
 
@@ -199,7 +199,7 @@ def test_xmp_matches_info_and_is_escaped(client):
 
 
 def test_pdf_date_to_xmp():
-    assert main.pdf_date_to_xmp("D:20260115103000+01'00'") == "2026-01-15T10:30:00+01:00"
-    assert main.pdf_date_to_xmp("D:20261031215455Z'") == "2026-10-31T21:54:55Z"
-    assert main.pdf_date_to_xmp("D:2026") == "2026-01-01T00:00:00"
-    assert main.pdf_date_to_xmp("not a date") is None
+    assert metadata_router.pdf_date_to_xmp("D:20260115103000+01'00'") == "2026-01-15T10:30:00+01:00"
+    assert metadata_router.pdf_date_to_xmp("D:20261031215455Z'") == "2026-10-31T21:54:55Z"
+    assert metadata_router.pdf_date_to_xmp("D:2026") == "2026-01-01T00:00:00"
+    assert metadata_router.pdf_date_to_xmp("not a date") is None

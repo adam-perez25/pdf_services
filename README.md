@@ -347,8 +347,8 @@ El mensaje de error indica las páginas, el tamaño estimado y qué cambiar
 
 ### Valores fijos
 
-Definidos como constantes en `app/main.py` (no se cambian con variables de
-entorno):
+Definidos como constantes en los módulos de `app/` (no se cambian con
+variables de entorno):
 
 | Constante | Valor | Descripción |
 | --- | --- | --- |
@@ -525,7 +525,17 @@ Linux. Las pruebas no forman parte de la imagen de Docker.
 
 ```text
 app/
-  main.py             # Aplicación FastAPI: páginas, endpoints y límites
+  main.py             # Crea la aplicación FastAPI: middlewares y routers
+  config.py           # Límites y tiempos configurables (variables de entorno)
+  middleware.py       # Límite de tamaño, protección entre sitios, cabeceras
+  uploads.py          # Tamaños de subida, nombres de descarga, archivos de trabajo
+  documents.py        # Documentos subidos por id y limpieza periódica
+  pdf_helpers.py      # Abrir PDFs, rangos de páginas, campos JSON
+  image_helpers.py    # Formatos y límite de píxeles de las imágenes subidas
+  heavy_jobs.py       # Cola por memoria para los trabajos grandes
+  external_tools.py   # LibreOffice, Ghostscript, Tesseract y su ejecución
+  errors.py           # Mensajes de error comunes
+  routers/            # Un router por herramienta, más páginas HTML y /health
 static/               # JavaScript (uno por herramienta, más common.js) y estilos
   fonts/              # Fuentes Manrope y DM Mono incluidas (licencia OFL)
 templates/            # Página de inicio y una página HTML por herramienta

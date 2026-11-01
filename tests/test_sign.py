@@ -6,7 +6,9 @@ import pypdfium2
 from pypdf import PdfReader, PdfWriter
 import pytest
 
-import app.main as main
+import app.external_tools as external_tools
+import app.pdf_helpers as pdf_helpers
+import app.routers.sign as sign_router
 from conftest import make_pdf, make_png
 
 
@@ -61,7 +63,7 @@ def sign(client, document_id: str, placements, signature: bytes | None = None,
 
 def render(content: bytes, page_index: int = 0) -> Image.Image:
     """Render a page as displayed (pdfium applies /Rotate and the cropbox)."""
-    with main.PDFIUM_LOCK:
+    with pdf_helpers.PDFIUM_LOCK:
         document = pypdfium2.PdfDocument(content)
         try:
             return document[page_index].render(scale=0.5).to_pil().convert("L")
@@ -188,7 +190,7 @@ def test_large_signature_is_scaled_down(client):
     reader = PdfReader(BytesIO(response.content))
     xobject = reader.pages[0]["/Resources"]["/XObject"]
     image = next(iter(xobject.values())).get_object()
-    assert max(image["/Width"], image["/Height"]) == main.SIGNATURE_MAX_SIDE
+    assert max(image["/Width"], image["/Height"]) == sign_router.SIGNATURE_MAX_SIDE
 
 
 @pytest.mark.parametrize(
@@ -252,7 +254,7 @@ def test_page_out_of_range(client, page):
 
 def test_too_many_placements(client):
     document_id = upload(client, blank_pdf([0]))
-    placements = [{"page": 1, **BOX}] * (main.SIGNATURE_MAX_PLACEMENTS + 1)
+    placements = [{"page": 1, **BOX}] * (sign_router.SIGNATURE_MAX_PLACEMENTS + 1)
     response = sign(client, document_id, placements)
     assert response.status_code == 400
 
@@ -276,7 +278,7 @@ def test_other_image_formats_rejected(client, image_format):
 def test_eps_signature_rejected(client, monkeypatch):
     document_id = upload(client, blank_pdf([0]))
     # Pillow would hand EPS to Ghostscript; it must never get that far.
-    monkeypatch.setattr(main.subprocess, "Popen", lambda *args, **kwargs: pytest.fail("ran a process"))
+    monkeypatch.setattr(external_tools.subprocess, "Popen", lambda *args, **kwargs: pytest.fail("ran a process"))
     eps = b"%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 10 10\nnewpath 0 0 moveto 10 10 lineto stroke\n%%EOF\n"
     response = sign(client, document_id, [{"page": 1, **BOX}], signature=eps, filename="firma.eps")
     assert response.status_code == 400
@@ -284,7 +286,7 @@ def test_eps_signature_rejected(client, monkeypatch):
 
 def test_oversized_signature_rejected(client, monkeypatch):
     document_id = upload(client, blank_pdf([0]))
-    monkeypatch.setattr(main, "SIGNATURE_MAX_MB", 0.0001)
+    monkeypatch.setattr(sign_router, "SIGNATURE_MAX_MB", 0.0001)
     response = sign(client, document_id, [{"page": 1, **BOX}], signature=make_png())
     assert response.status_code == 413
 

@@ -1,4 +1,5 @@
-import app.main as main
+import app.config as config
+import app.external_tools as external_tools
 
 
 def test_health_reports_ok(client):
@@ -22,7 +23,7 @@ def test_health_fails_when_storage_is_unusable(client, tmp_path, monkeypatch):
     # A regular file where the folder should be makes uploads impossible.
     blocked = tmp_path / "not-a-folder"
     blocked.write_text("x")
-    monkeypatch.setattr(main, "DOCUMENTS_DIR", blocked)
+    monkeypatch.setattr(config, "DOCUMENTS_DIR", blocked)
 
     response = client.get("/health")
 
@@ -31,7 +32,7 @@ def test_health_fails_when_storage_is_unusable(client, tmp_path, monkeypatch):
 
 
 def test_health_reports_missing_libreoffice(client, monkeypatch):
-    monkeypatch.setattr(main, "find_soffice", lambda: None)
+    monkeypatch.setattr(external_tools, "find_soffice", lambda: None)
 
     response = client.get("/health")
 
@@ -40,7 +41,7 @@ def test_health_reports_missing_libreoffice(client, monkeypatch):
 
 
 def test_health_reports_missing_ghostscript(client, monkeypatch):
-    monkeypatch.setattr(main, "find_ghostscript", lambda: None)
+    monkeypatch.setattr(external_tools, "find_ghostscript", lambda: None)
 
     response = client.get("/health")
 
@@ -51,7 +52,7 @@ def test_health_reports_missing_ghostscript(client, monkeypatch):
 def test_health_reports_ocr(client, monkeypatch):
     assert isinstance(client.get("/health").json()["ocr"], bool)
 
-    monkeypatch.setattr(main, "find_tesseract", lambda: None)
+    monkeypatch.setattr(external_tools, "find_tesseract", lambda: None)
 
     response = client.get("/health")
 

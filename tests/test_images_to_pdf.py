@@ -4,7 +4,8 @@ from PIL import Image
 from pypdf import PdfReader
 import pytest
 
-import app.main as main
+import app.external_tools as external_tools
+import app.pdf_helpers as pdf_helpers
 
 
 def make_image(width: int, height: int, noise: bool = False) -> bytes:
@@ -70,7 +71,7 @@ def test_each_image_keeps_its_own_page_size(client):
 
 
 @pytest.mark.skipif(
-    getattr(main, "find_ghostscript", lambda: None)() is None,
+    external_tools.find_ghostscript() is None,
     reason="Ghostscript is not installed",
 )
 def test_phone_photo_pdf_can_be_compressed(client):
@@ -114,7 +115,7 @@ def test_eps_is_rejected_without_running_ghostscript(client, monkeypatch):
 def render_page(content: bytes, index: int = 0) -> Image.Image:
     import pypdfium2
 
-    with main.PDFIUM_LOCK:
+    with pdf_helpers.PDFIUM_LOCK:
         document = pypdfium2.PdfDocument(content)
         try:
             return document[index].render(scale=1).to_pil().convert("RGB")

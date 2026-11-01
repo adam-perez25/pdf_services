@@ -5,6 +5,7 @@ import re
 from pypdf import PdfReader, PdfWriter
 import pytest
 
+import app.external_tools as external_tools
 import app.main as main
 from conftest import make_pdf
 
@@ -12,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW_JS = ROOT / "static" / "workflow.js"
 WORKFLOW_HTML = ROOT / "templates" / "workflow.html"
 
-needs_ghostscript = pytest.mark.skipif(main.find_ghostscript() is None, reason="Ghostscript is not installed")
+needs_ghostscript = pytest.mark.skipif(external_tools.find_ghostscript() is None, reason="Ghostscript is not installed")
 
 
 def make_pdf_with_metadata(page_count: int) -> bytes:
@@ -56,6 +57,17 @@ def test_script_is_served(client):
     assert "STEP_DEFINITIONS" in response.text
 
 
+def all_routes(routes):
+    """The app's routes, including those of the tool routers: FastAPI keeps an
+    included APIRouter as one entry that holds the router (original_router)."""
+    for route in routes:
+        included = getattr(route, "original_router", None)
+        if included is not None:
+            yield from all_routes(included.routes)
+        else:
+            yield route
+
+
 def test_script_only_calls_existing_endpoints():
     # Commented lines (the OCR example) do not count.
     code = "\n".join(
@@ -64,7 +76,7 @@ def test_script_only_calls_existing_endpoints():
     )
     endpoints = set(re.findall(r'"(/api/[^"]+)"', code))
     registered = {
-        route.path for route in main.app.routes if "POST" in (getattr(route, "methods", None) or set())
+        route.path for route in all_routes(main.app.routes) if "POST" in (getattr(route, "methods", None) or set())
     }
 
     assert {"/api/merge", "/api/stamp", "/api/metadata", "/api/compress", "/api/protect"} <= endpoints
@@ -185,7 +197,7 @@ def test_metadata_removed_last_survives_compress_and_ocr(client):
     )
     assert merge.status_code == 200
     result = merge.content
-    if main.ocr_available():
+    if external_tools.ocr_available():
         result = run_step(client, "/api/ocr", result, language="spa", output_name=name)
     result = run_step(
         client, "/api/stamp", result,

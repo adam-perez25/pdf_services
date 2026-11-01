@@ -5,7 +5,10 @@ import zipfile
 from PIL import Image
 import pytest
 
-import app.main as main
+import app.config as config
+import app.errors as errors
+import app.pdf_helpers as pdf_helpers
+import app.routers.pdf_to_images as pdf_to_images_router
 from conftest import make_pdf
 
 
@@ -78,7 +81,7 @@ def test_single_page_pdf_is_returned_as_an_image(client):
 
 
 def test_huge_pages_are_rendered_at_a_lower_resolution(client, monkeypatch):
-    monkeypatch.setattr(main, "MAX_IMAGE_PIXELS", 10_000)
+    monkeypatch.setattr(pdf_to_images_router, "MAX_IMAGE_PIXELS", 10_000)
     response = convert(client, make_pdf(1), dpi="300")
 
     width, height = Image.open(BytesIO(response.content)).size
@@ -139,8 +142,8 @@ def test_invalid_page_ranges_are_rejected(client, sample_pdf, documents_dir, pag
 
 def test_too_many_pixels_are_rejected_before_rendering(client, sample_pdf, documents_dir, monkeypatch):
     rendered = []
-    monkeypatch.setattr(main, "render_scale", lambda *args: rendered.append(args) or 300 / 72)
-    monkeypatch.setattr(main, "PDF_TO_IMAGES_MAX_MEGAPIXELS", 1)
+    monkeypatch.setattr(pdf_to_images_router, "render_scale", lambda *args: rendered.append(args) or 300 / 72)
+    monkeypatch.setattr(config, "PDF_TO_IMAGES_MAX_MEGAPIXELS", 1)
 
     # 4 pages of 1000 x 300 points in total at 300 ppp: about 5.2 megapixels.
     response = convert(client, sample_pdf, dpi="300")
@@ -156,7 +159,7 @@ def test_too_many_pixels_are_rejected_before_rendering(client, sample_pdf, docum
 
 
 def test_pixel_cap_counts_only_the_selected_pages_and_dpi(client, sample_pdf, monkeypatch):
-    monkeypatch.setattr(main, "PDF_TO_IMAGES_MAX_MEGAPIXELS", 1)
+    monkeypatch.setattr(config, "PDF_TO_IMAGES_MAX_MEGAPIXELS", 1)
 
     assert convert(client, sample_pdf, dpi="72").status_code == 200  # 0.3 Mpx
     assert convert(client, sample_pdf, dpi="300", pages="1").status_code == 200  # 0.5 Mpx
@@ -165,8 +168,8 @@ def test_pixel_cap_counts_only_the_selected_pages_and_dpi(client, sample_pdf, mo
 def test_estimate_respects_the_per_image_pixel_limit(client, monkeypatch):
     # Pages are rendered at no more than MAX_IMAGE_PIXELS, so a huge page
     # counts as that size in the estimate.
-    monkeypatch.setattr(main, "MAX_IMAGE_PIXELS", 10_000)
-    monkeypatch.setattr(main, "PDF_TO_IMAGES_MAX_MEGAPIXELS", 1)
+    monkeypatch.setattr(pdf_to_images_router, "MAX_IMAGE_PIXELS", 10_000)
+    monkeypatch.setattr(config, "PDF_TO_IMAGES_MAX_MEGAPIXELS", 1)
 
     assert convert(client, make_pdf(4), dpi="300").status_code == 200
 
@@ -177,8 +180,8 @@ class FakeUsage:
 
 
 def test_rejected_when_the_output_does_not_fit_on_disk(client, sample_pdf, documents_dir, monkeypatch):
-    monkeypatch.setattr(main.shutil, "disk_usage", lambda path: FakeUsage(600 * 1024 * 1024))
-    monkeypatch.setattr(main, "IMAGE_BYTES_PER_PIXEL", {"png": 20.0, "jpg": 2.0})
+    monkeypatch.setattr(pdf_to_images_router.shutil, "disk_usage", lambda path: FakeUsage(600 * 1024 * 1024))
+    monkeypatch.setattr(pdf_to_images_router, "IMAGE_BYTES_PER_PIXEL", {"png": 20.0, "jpg": 2.0})
 
     # About 5.2 Mpx at 20 bytes each is ~99 MB, plus the 512 MB margin > 600 MB.
     response = convert(client, sample_pdf, dpi="300")
@@ -195,13 +198,13 @@ def test_rejected_when_the_output_does_not_fit_on_disk(client, sample_pdf, docum
 
 
 def test_small_documents_pass_the_disk_check(client, sample_pdf, monkeypatch):
-    monkeypatch.setattr(main.shutil, "disk_usage", lambda path: FakeUsage(600 * 1024 * 1024))
+    monkeypatch.setattr(pdf_to_images_router.shutil, "disk_usage", lambda path: FakeUsage(600 * 1024 * 1024))
 
     assert convert(client, sample_pdf, dpi="300").status_code == 200
 
 
 def test_time_limit_stops_and_cleans_up(client, sample_pdf, documents_dir, monkeypatch):
-    monkeypatch.setattr(main, "pdf_to_images_timeout", lambda pages: -1)
+    monkeypatch.setattr(pdf_to_images_router, "pdf_to_images_timeout", lambda pages: -1)
 
     response = convert(client, sample_pdf, dpi="72")
 
@@ -213,21 +216,21 @@ def test_time_limit_stops_and_cleans_up(client, sample_pdf, documents_dir, monke
 
 
 def test_time_limit_does_not_cut_a_single_page(client, sample_pdf, monkeypatch):
-    monkeypatch.setattr(main, "pdf_to_images_timeout", lambda pages: -1)
+    monkeypatch.setattr(pdf_to_images_router, "pdf_to_images_timeout", lambda pages: -1)
 
     assert convert(client, sample_pdf, dpi="72", pages="2").status_code == 200
 
 
 def test_timeout_scales_with_pages_and_is_capped(monkeypatch):
-    monkeypatch.setattr(main, "PDF_TO_IMAGES_TIMEOUT_SECONDS", 300)
-    monkeypatch.setattr(main, "PDF_TO_IMAGES_SECONDS_PER_PAGE", 3)
-    monkeypatch.setattr(main, "PDF_TO_IMAGES_MAX_TIMEOUT_SECONDS", 7200)
+    monkeypatch.setattr(config, "PDF_TO_IMAGES_TIMEOUT_SECONDS", 300)
+    monkeypatch.setattr(config, "PDF_TO_IMAGES_SECONDS_PER_PAGE", 3)
+    monkeypatch.setattr(config, "PDF_TO_IMAGES_MAX_TIMEOUT_SECONDS", 7200)
 
-    assert main.pdf_to_images_timeout(20) == 360
-    assert main.pdf_to_images_timeout(1000) == 3300
-    assert main.pdf_to_images_timeout(5000) == 7200
-    monkeypatch.setattr(main, "PDF_TO_IMAGES_MAX_TIMEOUT_SECONDS", 10)
-    assert main.pdf_to_images_timeout(5000) == 300  # never below the base
+    assert pdf_to_images_router.pdf_to_images_timeout(20) == 360
+    assert pdf_to_images_router.pdf_to_images_timeout(1000) == 3300
+    assert pdf_to_images_router.pdf_to_images_timeout(5000) == 7200
+    monkeypatch.setattr(config, "PDF_TO_IMAGES_MAX_TIMEOUT_SECONDS", 10)
+    assert pdf_to_images_router.pdf_to_images_timeout(5000) == 300  # never below the base
 
 
 def test_disk_full_while_writing_cleans_up(client, sample_pdf, documents_dir, monkeypatch):
@@ -269,13 +272,13 @@ def test_overlong_page_list_is_rejected_quickly(client, documents_dir):
     response = convert(client, make_pdf(3), pages=",".join(["1-3"] * 1000))
 
     assert response.status_code == 400
-    assert str(main.PAGE_SELECTION_MAX_LENGTH) in response.json()["detail"]
+    assert str(pdf_helpers.PAGE_SELECTION_MAX_LENGTH) in response.json()["detail"]
     assert list(documents_dir.iterdir()) == []
 
 
 def test_non_finite_pixel_total_is_rejected():
-    with pytest.raises(main.HTTPException) as error:
-        main.check_pdf_to_images_budget(float("nan"), 1, 150, "png")
+    with pytest.raises(errors.HTTPException) as error:
+        pdf_to_images_router.check_pdf_to_images_budget(float("nan"), 1, 150, "png")
     assert error.value.status_code == 400
 
 
