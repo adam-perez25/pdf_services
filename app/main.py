@@ -43,11 +43,6 @@ PDFIUM_LOCK = threading.Lock()
 THUMBNAIL_WIDTH = 300
 MIN_RENDER_WIDTH = 100
 MAX_RENDER_WIDTH = 2000
-# Upload limits: per file, and for all the files of one request (merge, images).
-# They stop accidents and abuse, not big documents: a 1000-page scan is
-# usually a few hundred MB.
-# Unset, the total follows a raised per-file limit instead of stopping startup.
-# Extra room in a request for the multipart boundaries and the text fields.
 logger = logging.getLogger("uvicorn.error")
 
 
@@ -544,12 +539,6 @@ def file_download(path: Path, filename: str, media_type: str = "application/pdf"
 # (mem_limit 3g), so each job reserves an estimate of the memory it needs from
 # a shared budget and waits in line while the budget is used up. Small jobs
 # (the usual few-MB PDFs) skip the line entirely, so they never wait.
-# The budget leaves about 1 GB of the 3 GB for Python itself, the small jobs
-# that skip the line and estimates that fall short.
-# How long a request waits for its turn before giving up with a 503.
-# At most this many big jobs wait in line; more get a 503 at once. Each waiting
-# request holds one of the server's worker threads (about 40), and /health and
-# the small jobs need some of them too.
 # Jobs estimated below this many MB never wait and reserve nothing.
 HEAVY_JOB_MIN_MB = 100
 # Jobs on files smaller than this (in total) never wait either, whatever the
@@ -1440,12 +1429,6 @@ IMAGE_DPI_CHOICES = {72, 150, 300}
 # memory, so such pages are rendered at a lower resolution instead.
 MAX_IMAGE_PIXELS = 40_000_000
 
-# Guards for converting very long documents, checked before rendering anything.
-# An A4 page is about 2.2 million pixels at 150 ppp and 8.7 million at 300 ppp,
-# so the default of 10 000 megapixels allows 1000 A4 pages at 300 ppp (8.7 Gpx)
-# or about 4500 at 150 ppp, but rejects 2000 A4 pages at 300 ppp (17.4 Gpx),
-# which would take most of an hour and many GB of temporary disk.
-# Space that must stay free in the temporary folder after the estimated output.
 # Estimated bytes per output pixel, used only for the up-front disk check. A
 # text page takes well under 0.1 byte per pixel in PNG and a scanned or photo
 # page 1-3; 0.5 covers typical mixed documents without rejecting ordinary text
@@ -1874,8 +1857,6 @@ COMPRESSION_LEVELS = {
     "recommended": "/ebook",  # 150 dpi images, good for reading on screen
     "high": "/printer",  # 300 dpi images, good for printing
 }
-# Ghostscript's time grows with the page count, so the timeout does too:
-# base + per page, capped. 20 pages get 640 s, 1000 pages 2600 s.
 
 
 # pdfium accepts the %PDF- header anywhere in the first 1024 bytes, but
@@ -2961,8 +2942,6 @@ def sign_to_file(source, boxes: list[dict], image: Image.Image) -> Path:
 # and Ghostscript worker it started.
 OCR_LANGUAGES = {"spa", "eng", "spa+eng"}
 OCR_JOBS = 2  # Tesseract workers per request, so one OCR does not take every core
-# Big scans are allowed: the limits are settings like the other ones, and the
-# cap (4 h by default) covers about 700 pages at the slow 20 s per page.
 OCR_EXIT_ENCRYPTED = 8
 OCR_EXIT_MISSING_DEPENDENCY = 3
 OCR_EXIT_INVALID_CONFIG = 9  # e.g. a Tesseract language pack is missing
