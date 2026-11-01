@@ -21,47 +21,49 @@
         </section>
 
         <section class="workspace" aria-labelledby="pages-title">
-            <div class="section-heading">
-                <div>
-                    <p class="eyebrow">Documento</p>
-                    <h2 id="pages-title">Tus páginas</h2>
+            <ol class="steps" aria-label="Pasos">
+                <li class="step" aria-current="step"><span class="step-number">1</span>Elige el archivo</li>
+                <li class="step"><span class="step-number">2</span>Gira, ordena o elimina</li>
+                <li class="step"><span class="step-number">3</span>Descarga</li>
+            </ol>
+
+            <form class="tool-layout is-wide" id="pages-form">
+                <div class="tool-files">
+                    <div class="section-heading">
+                        <h2 id="pages-title">Tus páginas</h2>
+                        <span id="page-count" class="counter">0 páginas</span>
+                    </div>
+
+                    <label class="dropzone" for="pages-file-input" id="pages-dropzone">
+                        <span class="drop-icon">+</span>
+                        <span><strong>Seleccionar PDF</strong><small id="pages-file-name">o arrástralo aquí</small></span>
+                        <input id="pages-file-input" type="file" accept="application/pdf,.pdf">
+                    </label>
+
+                    <div id="pages-toolbar" class="page-toolbar" hidden>
+                        <button class="tool-button" type="button" data-rotate-all="-90">&#8634; Girar todas</button>
+                        <button class="tool-button" type="button" data-rotate-all="90">&#8635; Girar todas</button>
+                        <button class="tool-button" type="button" id="pages-reset">Restablecer</button>
+                    </div>
+
+                    <div id="pages-empty" class="empty-state">Selecciona un PDF para ver sus páginas.</div>
+                    <p id="pages-help" class="reorder-help" hidden>Arrastra una página por su asa (&#10303;) o mantenla pulsada para moverla. Con el teclado, enfoca el asa y usa las flechas.</p>
+                    <ol id="page-grid" class="page-grid"></ol>
                 </div>
-                <span id="page-count" class="counter">0 páginas</span>
-            </div>
-
-            <label class="dropzone" for="pages-file-input" id="pages-dropzone">
-                <span class="drop-icon">+</span>
-                <span><strong>Seleccionar PDF</strong><small id="pages-file-name">o arrástralo aquí</small></span>
-                <input id="pages-file-input" type="file" accept="application/pdf,.pdf">
-            </label>
-
-            <div id="pages-toolbar" class="page-toolbar" hidden>
-                <button class="tool-button" type="button" data-rotate-all="-90">&#8634; Girar todas</button>
-                <button class="tool-button" type="button" data-rotate-all="90">&#8635; Girar todas</button>
-                <button class="tool-button" type="button" id="pages-reset">Restablecer</button>
-            </div>
-
-            <div id="pages-empty" class="empty-state">Selecciona un PDF para ver sus páginas.</div>
-            <ol id="page-grid" class="page-grid" aria-live="polite"></ol>
-
-            <div class="section-heading output-heading">
-                <div>
-                    <p class="eyebrow">Exportar</p>
-                    <h2>Nombre del resultado</h2>
+                <div class="tool-options">
+                    <label class="name-field">
+                        <span>Nombre del PDF</span>
+                        <input id="pages-output-name" type="text" value="edited.pdf" maxlength="120" autocomplete="off">
+                    </label>
+                    <div class="action-bar">
+                        <button class="primary-button" type="submit">
+                            <span>Guardar y descargar</span>
+                            <span aria-hidden="true">&#8594;</span>
+                        </button>
+                        <p id="pages-status" class="status" role="status"></p>
+                    </div>
                 </div>
-            </div>
-
-            <form id="pages-form">
-                <label class="name-field">
-                    <span>Nombre del PDF</span>
-                    <input id="pages-output-name" type="text" value="edited.pdf" maxlength="120" autocomplete="off">
-                </label>
-                <button class="primary-button" type="submit">
-                    <span>Guardar y descargar</span>
-                    <span aria-hidden="true">&#8594;</span>
-                </button>
             </form>
-            <p id="pages-status" class="status" role="status"></p>
         </section>
     </main>
     </div>

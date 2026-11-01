@@ -174,7 +174,7 @@ def test_step_order_is_enforced_by_position():
     code = WORKFLOW_JS.read_text(encoding="utf-8")
     assert "last: true" not in code
     # Moves only between steps of the same position group.
-    assert "return rank(steps[index].definition) === rank(steps[target].definition);" in code
+    assert "return rank(steps[from].definition) === rank(steps[to].definition);" in code
 
 
 def test_page_explains_the_fixed_order():

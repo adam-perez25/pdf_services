@@ -99,7 +99,7 @@ metadataForm.addEventListener("submit", async (event) => {
         if (!response.ok) throw new Error(await errorMessage(response, "No se pudieron editar los metadatos."));
 
         downloadBlob(await response.blob(), withPdfExtension(name));
-        setStatus(metadataRemoveAll.checked ? "Metadatos eliminados. PDF descargado." : "Metadatos guardados. PDF descargado.", false);
+        setStatus(metadataRemoveAll.checked ? "Metadatos eliminados. PDF descargado." : "Metadatos guardados. PDF descargado.", "done");
         resetMetadataForm();
     } catch (error) {
         setStatus(error.message, true);

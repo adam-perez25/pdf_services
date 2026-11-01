@@ -26,23 +26,34 @@
                 <p class="view-lede">Todas las hojas del libro se convierten mediante LibreOffice.</p>
             </div>
 
-            <form id="office-form" data-endpoint="/api/excel-to-pdf" data-extensions="xls,xlsx" data-default-name="hoja-de-calculo.pdf" data-missing-file="Selecciona una hoja de cálculo Excel.">
-                <label class="dropzone" for="office-input" id="office-dropzone">
-                    <span class="drop-icon">+</span>
-                    <span><strong>Seleccionar hoja de cálculo</strong><small id="office-file-name">o arrástrala aquí</small></span>
-                    <input id="office-input" type="file" accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
-                </label>
+            <ol class="steps" aria-label="Pasos">
+                <li class="step" aria-current="step"><span class="step-number">1</span>Elige el archivo</li>
+                <li class="step"><span class="step-number">2</span>Ajusta</li>
+                <li class="step"><span class="step-number">3</span>Descarga</li>
+            </ol>
 
-                <label class="name-field">
-                    <span>Nombre del PDF</span>
-                    <input id="office-output-name" type="text" value="hoja-de-calculo.pdf" maxlength="120" autocomplete="off">
-                </label>
-                <button class="primary-button" type="submit">
-                    <span>Convertir y descargar PDF</span>
-                    <span aria-hidden="true">&#8594;</span>
-                </button>
+            <form class="tool-layout" id="office-form" data-endpoint="/api/excel-to-pdf" data-extensions="xls,xlsx" data-default-name="hoja-de-calculo.pdf" data-missing-file="Selecciona una hoja de cálculo Excel.">
+                <div class="tool-files">
+                    <label class="dropzone" for="office-input" id="office-dropzone">
+                        <span class="drop-icon">+</span>
+                        <span><strong>Seleccionar hoja de cálculo</strong><small id="office-file-name">o arrástrala aquí</small></span>
+                        <input id="office-input" type="file" accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+                    </label>
+                </div>
+                <div class="tool-options">
+                    <label class="name-field">
+                        <span>Nombre del PDF</span>
+                        <input id="office-output-name" type="text" value="hoja-de-calculo.pdf" maxlength="120" autocomplete="off">
+                    </label>
+                    <div class="action-bar">
+                        <button class="primary-button" type="submit">
+                            <span>Convertir y descargar PDF</span>
+                            <span aria-hidden="true">&#8594;</span>
+                        </button>
+                        <p id="office-status" class="status" role="status"></p>
+                    </div>
+                </div>
             </form>
-            <p id="office-status" class="status" role="status"></p>
         </section>
     </main>
     </div>

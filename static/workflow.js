@@ -357,7 +357,6 @@ const STEP_DEFINITIONS = [
 // ---- State ----
 
 let selectedFiles = [];
-let draggedIndex = null;
 let steps = []; // user-chosen steps: { definition, element, options, fill, stateLabel, note }
 let mergeStep = null; // created on demand when there is more than one file
 let running = false;
@@ -394,7 +393,7 @@ function renderFiles() {
     selectedFiles.forEach((file, index) => {
         const item = document.createElement("li");
         item.className = "file-item";
-        item.draggable = true;
+        item.dataset.index = index;
         item.innerHTML = `
             <span class="file-number">${String(index + 1).padStart(2, "0")}</span>
             <span class="file-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
@@ -402,20 +401,7 @@ function renderFiles() {
             <button class="move-button" type="button" data-action="down" aria-label="Bajar ${escapeHtml(file.name)}">&#8595;</button>
             <button class="remove-button" type="button" aria-label="Eliminar ${escapeHtml(file.name)}">&times;</button>
         `;
-        item.addEventListener("dragstart", () => {
-            draggedIndex = index;
-            item.classList.add("is-dragging");
-        });
-        item.addEventListener("dragend", () => {
-            item.classList.remove("is-dragging");
-            draggedIndex = null;
-        });
-        item.addEventListener("dragover", (event) => event.preventDefault());
-        item.addEventListener("drop", (event) => {
-            event.stopPropagation();
-            moveFile(draggedIndex, index);
-            draggedIndex = null;
-        });
+        item.prepend(dragHandle(`Mover ${file.name}`));
         item.querySelector('[data-action="up"]').addEventListener("click", () => moveFile(index, index - 1));
         item.querySelector('[data-action="down"]').addEventListener("click", () => moveFile(index, index + 1));
         item.querySelector(".remove-button").addEventListener("click", () => {
@@ -430,6 +416,12 @@ function renderFiles() {
     if (!nameEdited) workflowOutputName.value = defaultOutputName();
     renderSteps();
 }
+
+reorderableList(workflowFiles, {
+    move: moveFile,
+    canMove: () => !running,
+    describe: (index) => selectedFiles[index].name,
+});
 
 function moveFile(fromIndex, toIndex) {
     if (running || fromIndex === null || toIndex < 0 || toIndex >= selectedFiles.length || fromIndex === toIndex) return;
@@ -471,6 +463,7 @@ function createStep(definition) {
     const step = { definition, element, number, stateLabel };
 
     if (!definition.fixed) {
+        header.prepend(dragHandle(`Mover ${definition.title}`));
         const up = moveButton("up", `Subir ${definition.title}`, "↑");
         const down = moveButton("down", `Bajar ${definition.title}`, "↓");
         const remove = document.createElement("button");
@@ -478,8 +471,8 @@ function createStep(definition) {
         remove.className = "remove-button";
         remove.setAttribute("aria-label", `Quitar ${definition.title}`);
         remove.textContent = "×";
-        up.addEventListener("click", () => moveStep(step, -1));
-        down.addEventListener("click", () => moveStep(step, 1));
+        up.addEventListener("click", () => moveStepTo(steps.indexOf(step), steps.indexOf(step) - 1));
+        down.addEventListener("click", () => moveStepTo(steps.indexOf(step), steps.indexOf(step) + 1));
         remove.addEventListener("click", () => removeStep(step));
         header.append(up, down, remove);
         step.up = up;
@@ -525,23 +518,27 @@ function rank(definition) {
     return POSITION_RANK[definition.position || "normal"];
 }
 
-// A step can only swap places with a neighbour of the same position group, so
-// OCR stays first, metadata late and protect last whatever the user does.
-function canMove(index, offset) {
-    const target = index + offset;
-    if (target < 0 || target >= steps.length) return false;
-    return rank(steps[index].definition) === rank(steps[target].definition);
+// A step only moves within its position group, so OCR stays first, metadata
+// late and protect last whatever the user does. Steps are kept sorted by
+// group, so the same group at both ends means every step in between shares it.
+function canMove(from, to) {
+    if (running || to < 0 || to >= steps.length || from === to) return false;
+    return rank(steps[from].definition) === rank(steps[to].definition);
 }
 
-function moveStep(step, offset) {
-    if (running) return;
-    const index = steps.indexOf(step);
-    if (!canMove(index, offset)) return;
-    steps.splice(index, 1);
-    steps.splice(index + offset, 0, step);
+function moveStepTo(from, to) {
+    if (!canMove(from, to)) return;
+    const [step] = steps.splice(from, 1);
+    steps.splice(to, 0, step);
     forgetLastResult();
     renderSteps();
 }
+
+reorderableList(workflowSteps, {
+    move: moveStepTo,
+    canMove,
+    describe: (index) => steps[index].definition.title,
+});
 
 function removeStep(step) {
     if (running) return;
@@ -580,8 +577,9 @@ function renderSteps() {
         step.number.textContent = String(index + 1).padStart(2, "0");
     });
     steps.forEach((step, index) => {
-        step.up.disabled = !canMove(index, -1);
-        step.down.disabled = !canMove(index, 1);
+        step.element.dataset.index = index;
+        step.up.disabled = !canMove(index, index - 1);
+        step.down.disabled = !canMove(index, index + 1);
     });
     workflowEmptySteps.hidden = all.length > 0;
     workflowStepCount.textContent = `${all.length} ${all.length === 1 ? "paso" : "pasos"}`;
@@ -667,7 +665,7 @@ workflowForm.addEventListener("submit", async (event) => {
         }
 
         downloadBlob(current, downloadName(finalResponse) || withPdfExtension(name));
-        setStatus("Flujo completado. PDF descargado.", false);
+        setStatus("Flujo completado. PDF descargado.", "done");
     } catch (error) {
         setStatus(error.message, true);
         if (lastResult) {

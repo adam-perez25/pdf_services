@@ -54,7 +54,7 @@ pdfImagesForm.addEventListener("submit", async (event) => {
         resetPdfImagesForm();
         setStatus(blob.type === "application/zip"
             ? `Imágenes creadas y descargadas en ${filename}.`
-            : "Imagen creada y descargada.", false);
+            : "Imagen creada y descargada.", "done");
     } catch (error) {
         setStatus(error.message, true);
     }

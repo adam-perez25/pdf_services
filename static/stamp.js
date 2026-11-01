@@ -84,7 +84,7 @@ stampForm.addEventListener("submit", async (event) => {
         if (!response.ok) throw new Error(await errorMessage(response, "No se pudo modificar el PDF."));
 
         downloadBlob(await response.blob(), withPdfExtension(name));
-        setStatus(mode === "numbers" ? "PDF numerado y descargado." : "Marca de agua añadida y PDF descargado.", false);
+        setStatus(mode === "numbers" ? "PDF numerado y descargado." : "Marca de agua añadida y PDF descargado.", "done");
         resetStampForm();
     } catch (error) {
         setStatus(error.message, true);

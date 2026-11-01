@@ -55,7 +55,7 @@ extractForm.addEventListener("submit", async (event) => {
         const pageCount = Number(response.headers.get("X-Page-Count"));
         const characterCount = Number(response.headers.get("X-Character-Count"));
         const pagesLabel = pageCount === 1 ? "1 página" : `${pageCount.toLocaleString("es-ES")} páginas`;
-        setStatus(`Texto descargado: ${characterCount.toLocaleString("es-ES")} caracteres de ${pagesLabel}.`, false);
+        setStatus(`Texto descargado: ${characterCount.toLocaleString("es-ES")} caracteres de ${pagesLabel}.`, "done");
 
         // Only the start of the file is read for the preview; textContent and
         // value never interpret the text as HTML.

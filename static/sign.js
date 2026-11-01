@@ -654,7 +654,7 @@ signForm.addEventListener("submit", async (event) => {
         // The server deleted its copy as part of the download.
         documentExpired = true;
         downloadBlob(await response.blob(), withPdfExtension(name));
-        setStatus("PDF firmado y descargado.", false);
+        setStatus("PDF firmado y descargado.", "done");
     } catch (error) {
         setStatus(error.message, true);
     }

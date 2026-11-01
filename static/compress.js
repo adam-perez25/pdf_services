@@ -48,9 +48,9 @@ compressForm.addEventListener("submit", async (event) => {
         const compressed = Number(response.headers.get("X-Compressed-Size"));
         if (response.headers.get("X-Compression-Applied") === "true") {
             const saved = Math.round((1 - compressed / original) * 100);
-            setStatus(`PDF comprimido y descargado: ${formatSize(original)} → ${formatSize(compressed)} (−${saved} %).`, false);
+            setStatus(`PDF comprimido y descargado: ${formatSize(original)} → ${formatSize(compressed)} (−${saved} %).`, "done");
         } else {
-            setStatus("Este PDF ya estaba optimizado: comprimirlo no lo reducía, así que se ha descargado el original.", false);
+            setStatus("Este PDF ya estaba optimizado: comprimirlo no lo reducía, así que se ha descargado el original.", "done");
         }
         resetCompressForm();
     } catch (error) {

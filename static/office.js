@@ -55,7 +55,7 @@ officeForm.addEventListener("submit", async (event) => {
         officeInput.value = "";
         officeFileName.textContent = emptyFileLabel;
         officeOutputName.value = defaultName;
-        setStatus("PDF creado y descargado.", false);
+        setStatus("PDF creado y descargado.", "done");
     } catch (error) {
         if (error.name === "AbortError") {
             setStatus("Guardado cancelado.", false);

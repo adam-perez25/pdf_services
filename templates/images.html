@@ -26,26 +26,37 @@
                 <p class="view-lede">Cada imagen ocupará una página del PDF en el orden mostrado.</p>
             </div>
 
-            <form id="images-form">
-                <label class="dropzone" for="images-input" id="images-dropzone">
-                    <span class="drop-icon">+</span>
-                    <span><strong>Seleccionar imágenes</strong><small>o arrástralas aquí</small></span>
-                    <input id="images-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/tiff" multiple>
-                </label>
+            <ol class="steps" aria-label="Pasos">
+                <li class="step" aria-current="step"><span class="step-number">1</span>Elige las imágenes</li>
+                <li class="step"><span class="step-number">2</span>Ajusta</li>
+                <li class="step"><span class="step-number">3</span>Descarga</li>
+            </ol>
 
-                <div id="images-empty" class="empty-state">Todavía no has seleccionado ninguna imagen.</div>
-                <ol id="images-list" class="image-list" aria-live="polite"></ol>
+            <form class="tool-layout" id="images-form">
+                <div class="tool-files">
+                    <label class="dropzone" for="images-input" id="images-dropzone">
+                        <span class="drop-icon">+</span>
+                        <span><strong>Seleccionar imágenes</strong><small>o arrástralas aquí</small></span>
+                        <input id="images-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/tiff" multiple>
+                    </label>
 
-                <label class="name-field">
-                    <span>Nombre del PDF</span>
-                    <input id="images-output-name" type="text" value="images.pdf" maxlength="120" autocomplete="off">
-                </label>
-                <button class="primary-button" type="submit">
-                    <span>Crear y descargar PDF</span>
-                    <span aria-hidden="true">&#8594;</span>
-                </button>
+                    <div id="images-empty" class="empty-state">Todavía no has seleccionado ninguna imagen.</div>
+                    <ol id="images-list" class="image-list" aria-live="polite"></ol>
+                </div>
+                <div class="tool-options">
+                    <label class="name-field">
+                        <span>Nombre del PDF</span>
+                        <input id="images-output-name" type="text" value="images.pdf" maxlength="120" autocomplete="off">
+                    </label>
+                    <div class="action-bar">
+                        <button class="primary-button" type="submit">
+                            <span>Crear y descargar PDF</span>
+                            <span aria-hidden="true">&#8594;</span>
+                        </button>
+                        <p id="images-status" class="status" role="status"></p>
+                    </div>
+                </div>
             </form>
-            <p id="images-status" class="status" role="status"></p>
         </section>
     </main>
     </div>

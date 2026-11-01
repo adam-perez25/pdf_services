@@ -26,23 +26,34 @@
                 <p class="view-lede">La conversión conserva el formato mediante LibreOffice.</p>
             </div>
 
-            <form id="office-form" data-endpoint="/api/word-to-pdf" data-extensions="doc,docx" data-default-name="documento.pdf" data-missing-file="Selecciona un documento Word.">
-                <label class="dropzone" for="office-input" id="office-dropzone">
-                    <span class="drop-icon">+</span>
-                    <span><strong>Seleccionar documento</strong><small id="office-file-name">o arrástralo aquí</small></span>
-                    <input id="office-input" type="file" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
-                </label>
+            <ol class="steps" aria-label="Pasos">
+                <li class="step" aria-current="step"><span class="step-number">1</span>Elige el archivo</li>
+                <li class="step"><span class="step-number">2</span>Ajusta</li>
+                <li class="step"><span class="step-number">3</span>Descarga</li>
+            </ol>
 
-                <label class="name-field">
-                    <span>Nombre del PDF</span>
-                    <input id="office-output-name" type="text" value="documento.pdf" maxlength="120" autocomplete="off">
-                </label>
-                <button class="primary-button" type="submit">
-                    <span>Convertir y descargar PDF</span>
-                    <span aria-hidden="true">&#8594;</span>
-                </button>
+            <form class="tool-layout" id="office-form" data-endpoint="/api/word-to-pdf" data-extensions="doc,docx" data-default-name="documento.pdf" data-missing-file="Selecciona un documento Word.">
+                <div class="tool-files">
+                    <label class="dropzone" for="office-input" id="office-dropzone">
+                        <span class="drop-icon">+</span>
+                        <span><strong>Seleccionar documento</strong><small id="office-file-name">o arrástralo aquí</small></span>
+                        <input id="office-input" type="file" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+                    </label>
+                </div>
+                <div class="tool-options">
+                    <label class="name-field">
+                        <span>Nombre del PDF</span>
+                        <input id="office-output-name" type="text" value="documento.pdf" maxlength="120" autocomplete="off">
+                    </label>
+                    <div class="action-bar">
+                        <button class="primary-button" type="submit">
+                            <span>Convertir y descargar PDF</span>
+                            <span aria-hidden="true">&#8594;</span>
+                        </button>
+                        <p id="office-status" class="status" role="status"></p>
+                    </div>
+                </div>
             </form>
-            <p id="office-status" class="status" role="status"></p>
         </section>
     </main>
     </div>

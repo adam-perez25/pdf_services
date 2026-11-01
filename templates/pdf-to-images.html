@@ -26,45 +26,56 @@
                 <p class="view-lede">Se crea una imagen por página y se descargan juntas en un ZIP.</p>
             </div>
 
-            <form id="pdf-images-form">
-                <label class="dropzone" for="pdf-images-input" id="pdf-images-dropzone">
-                    <span class="drop-icon">+</span>
-                    <span><strong>Seleccionar PDF</strong><small id="pdf-images-file-name">o arrástralo aquí</small></span>
-                    <input id="pdf-images-input" type="file" accept="application/pdf,.pdf">
-                </label>
+            <ol class="steps" aria-label="Pasos">
+                <li class="step" aria-current="step"><span class="step-number">1</span>Elige el archivo</li>
+                <li class="step"><span class="step-number">2</span>Ajusta</li>
+                <li class="step"><span class="step-number">3</span>Descarga</li>
+            </ol>
 
-                <label class="name-field">
-                    <span>Formato de imagen</span>
-                    <select id="pdf-images-format">
-                        <option value="png" selected>PNG: sin pérdida, ideal para texto y gráficos</option>
-                        <option value="jpg">JPG: archivos más ligeros, ideal para fotos</option>
-                    </select>
-                </label>
+            <form class="tool-layout" id="pdf-images-form">
+                <div class="tool-files">
+                    <label class="dropzone" for="pdf-images-input" id="pdf-images-dropzone">
+                        <span class="drop-icon">+</span>
+                        <span><strong>Seleccionar PDF</strong><small id="pdf-images-file-name">o arrástralo aquí</small></span>
+                        <input id="pdf-images-input" type="file" accept="application/pdf,.pdf">
+                    </label>
+                </div>
+                <div class="tool-options">
+                    <label class="name-field">
+                        <span>Formato de imagen</span>
+                        <select id="pdf-images-format">
+                            <option value="png" selected>PNG: sin pérdida, ideal para texto y gráficos</option>
+                            <option value="jpg">JPG: archivos más ligeros, ideal para fotos</option>
+                        </select>
+                    </label>
 
-                <label class="name-field">
-                    <span>Resolución</span>
-                    <select id="pdf-images-dpi">
-                        <option value="72">Baja: 72 ppp</option>
-                        <option value="150" selected>Media: 150 ppp, buena para pantalla</option>
-                        <option value="300">Alta: 300 ppp, buena para imprimir</option>
-                    </select>
-                </label>
+                    <label class="name-field">
+                        <span>Resolución</span>
+                        <select id="pdf-images-dpi">
+                            <option value="72">Baja: 72 ppp</option>
+                            <option value="150" selected>Media: 150 ppp, buena para pantalla</option>
+                            <option value="300">Alta: 300 ppp, buena para imprimir</option>
+                        </select>
+                    </label>
 
-                <label class="name-field">
-                    <span>Páginas (vacío = todas; por ejemplo 1-3, 5)</span>
-                    <input id="pdf-images-pages" type="text" maxlength="200" autocomplete="off" placeholder="Todas">
-                </label>
+                    <label class="name-field">
+                        <span>Páginas (vacío = todas; por ejemplo 1-3, 5)</span>
+                        <input id="pdf-images-pages" type="text" maxlength="200" autocomplete="off" placeholder="Todas">
+                    </label>
 
-                <label class="name-field">
-                    <span>Nombre base de las imágenes</span>
-                    <input id="pdf-images-base-name" type="text" value="pdf-images" maxlength="120" autocomplete="off">
-                </label>
-                <button class="primary-button" type="submit">
-                    <span>Convertir y descargar</span>
-                    <span aria-hidden="true">&#8594;</span>
-                </button>
+                    <label class="name-field">
+                        <span>Nombre base de las imágenes</span>
+                        <input id="pdf-images-base-name" type="text" value="pdf-images" maxlength="120" autocomplete="off">
+                    </label>
+                    <div class="action-bar">
+                        <button class="primary-button" type="submit">
+                            <span>Convertir y descargar</span>
+                            <span aria-hidden="true">&#8594;</span>
+                        </button>
+                        <p id="pdf-images-status" class="status" role="status"></p>
+                    </div>
+                </div>
             </form>
-            <p id="pdf-images-status" class="status" role="status"></p>
         </section>
     </main>
     </div>

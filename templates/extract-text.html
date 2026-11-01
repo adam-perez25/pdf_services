@@ -26,37 +26,48 @@
                 <p class="view-lede">Solo se extrae el texto que ya contiene el PDF. Los documentos escaneados son imágenes: pásalos antes por la herramienta OCR.</p>
             </div>
 
-            <form id="extract-text-form">
-                <label class="dropzone" for="extract-text-input" id="extract-text-dropzone">
-                    <span class="drop-icon">+</span>
-                    <span><strong>Seleccionar PDF</strong><small id="extract-text-file-name">o arrástralo aquí</small></span>
-                    <input id="extract-text-input" type="file" accept="application/pdf,.pdf">
-                </label>
+            <ol class="steps" aria-label="Pasos">
+                <li class="step" aria-current="step"><span class="step-number">1</span>Elige el archivo</li>
+                <li class="step"><span class="step-number">2</span>Ajusta</li>
+                <li class="step"><span class="step-number">3</span>Descarga</li>
+            </ol>
 
-                <label class="name-field">
-                    <span>Páginas (vacío = todas; por ejemplo 1-3, 5)</span>
-                    <input id="extract-text-pages" type="text" maxlength="200" autocomplete="off" placeholder="Todas">
-                </label>
+            <form class="tool-layout" id="extract-text-form">
+                <div class="tool-files">
+                    <label class="dropzone" for="extract-text-input" id="extract-text-dropzone">
+                        <span class="drop-icon">+</span>
+                        <span><strong>Seleccionar PDF</strong><small id="extract-text-file-name">o arrástralo aquí</small></span>
+                        <input id="extract-text-input" type="file" accept="application/pdf,.pdf">
+                    </label>
+                </div>
+                <div class="tool-options">
+                    <label class="name-field">
+                        <span>Páginas (vacío = todas; por ejemplo 1-3, 5)</span>
+                        <input id="extract-text-pages" type="text" maxlength="200" autocomplete="off" placeholder="Todas">
+                    </label>
 
-                <label class="name-field">
-                    <span>Separador entre páginas</span>
-                    <select id="extract-text-separator">
-                        <option value="header" selected>Encabezado «--- Página N ---»</option>
-                        <option value="formfeed">Salto de página (form feed)</option>
-                        <option value="none">Ninguno</option>
-                    </select>
-                </label>
+                    <label class="name-field">
+                        <span>Separador entre páginas</span>
+                        <select id="extract-text-separator">
+                            <option value="header" selected>Encabezado «--- Página N ---»</option>
+                            <option value="formfeed">Salto de página (form feed)</option>
+                            <option value="none">Ninguno</option>
+                        </select>
+                    </label>
 
-                <label class="name-field">
-                    <span>Nombre del archivo TXT</span>
-                    <input id="extract-text-output-name" type="text" value="texto.txt" maxlength="120" autocomplete="off">
-                </label>
-                <button class="primary-button" type="submit">
-                    <span>Extraer y descargar</span>
-                    <span aria-hidden="true">&#8594;</span>
-                </button>
+                    <label class="name-field">
+                        <span>Nombre del archivo TXT</span>
+                        <input id="extract-text-output-name" type="text" value="texto.txt" maxlength="120" autocomplete="off">
+                    </label>
+                    <div class="action-bar">
+                        <button class="primary-button" type="submit">
+                            <span>Extraer y descargar</span>
+                            <span aria-hidden="true">&#8594;</span>
+                        </button>
+                        <p id="extract-text-status" class="status" role="status"></p>
+                    </div>
+                </div>
             </form>
-            <p id="extract-text-status" class="status" role="status"></p>
 
             <label class="name-field text-preview" id="extract-text-preview-field" hidden>
                 <span id="extract-text-preview-label">Vista previa</span>

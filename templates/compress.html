@@ -26,32 +26,43 @@
                 <p class="view-lede">La compresión se hace con Ghostscript. Si el resultado no es más pequeño, se descarga el original.</p>
             </div>
 
-            <form id="compress-form">
-                <label class="dropzone" for="compress-input" id="compress-dropzone">
-                    <span class="drop-icon">+</span>
-                    <span><strong>Seleccionar PDF</strong><small id="compress-file-name">o arrástralo aquí</small></span>
-                    <input id="compress-input" type="file" accept="application/pdf,.pdf">
-                </label>
+            <ol class="steps" aria-label="Pasos">
+                <li class="step" aria-current="step"><span class="step-number">1</span>Elige el archivo</li>
+                <li class="step"><span class="step-number">2</span>Ajusta</li>
+                <li class="step"><span class="step-number">3</span>Descarga</li>
+            </ol>
 
-                <label class="name-field">
-                    <span>Nivel de compresión</span>
-                    <select id="compress-level">
-                        <option value="strong">Máxima: archivo más pequeño (imágenes a 72 ppp)</option>
-                        <option value="recommended" selected>Recomendada: buena para leer en pantalla (150 ppp)</option>
-                        <option value="high">Alta calidad: buena para imprimir (300 ppp)</option>
-                    </select>
-                </label>
+            <form class="tool-layout" id="compress-form">
+                <div class="tool-files">
+                    <label class="dropzone" for="compress-input" id="compress-dropzone">
+                        <span class="drop-icon">+</span>
+                        <span><strong>Seleccionar PDF</strong><small id="compress-file-name">o arrástralo aquí</small></span>
+                        <input id="compress-input" type="file" accept="application/pdf,.pdf">
+                    </label>
+                </div>
+                <div class="tool-options">
+                    <label class="name-field">
+                        <span>Nivel de compresión</span>
+                        <select id="compress-level">
+                            <option value="strong">Máxima: archivo más pequeño (imágenes a 72 ppp)</option>
+                            <option value="recommended" selected>Recomendada: buena para leer en pantalla (150 ppp)</option>
+                            <option value="high">Alta calidad: buena para imprimir (300 ppp)</option>
+                        </select>
+                    </label>
 
-                <label class="name-field">
-                    <span>Nombre del PDF</span>
-                    <input id="compress-output-name" type="text" value="compressed.pdf" maxlength="120" autocomplete="off">
-                </label>
-                <button class="primary-button" type="submit">
-                    <span>Comprimir y descargar</span>
-                    <span aria-hidden="true">&#8594;</span>
-                </button>
+                    <label class="name-field">
+                        <span>Nombre del PDF</span>
+                        <input id="compress-output-name" type="text" value="compressed.pdf" maxlength="120" autocomplete="off">
+                    </label>
+                    <div class="action-bar">
+                        <button class="primary-button" type="submit">
+                            <span>Comprimir y descargar</span>
+                            <span aria-hidden="true">&#8594;</span>
+                        </button>
+                        <p id="compress-status" class="status" role="status"></p>
+                    </div>
+                </div>
             </form>
-            <p id="compress-status" class="status" role="status"></p>
         </section>
     </main>
     </div>

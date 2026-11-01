@@ -9,7 +9,6 @@ const setStatus = statusSetter(imagesStatus);
 const progress = uploadProgress(imagesStatus);
 
 let selectedImages = [];
-let draggedIndex = null;
 
 imagesInput.addEventListener("change", () => {
     selectedImages = [...imagesInput.files].filter(isImage);
@@ -28,7 +27,7 @@ function renderImages() {
     selectedImages.forEach((image, index) => {
         const item = document.createElement("li");
         item.className = "image-item";
-        item.draggable = true;
+        item.dataset.index = index;
         const previewUrl = URL.createObjectURL(image);
         item.innerHTML = `
             <span class="file-number">${String(index + 1).padStart(2, "0")}</span>
@@ -39,19 +38,8 @@ function renderImages() {
             <button class="remove-button" type="button" aria-label="Eliminar ${escapeHtml(image.name)}">&times;</button>
         `;
 
-        item.addEventListener("dragstart", () => {
-            draggedIndex = index;
-            item.classList.add("is-dragging");
-        });
-        item.addEventListener("dragend", () => {
-            item.classList.remove("is-dragging");
-            URL.revokeObjectURL(previewUrl);
-        });
-        item.addEventListener("dragover", (event) => event.preventDefault());
-        item.addEventListener("drop", (event) => {
-            event.stopPropagation();
-            moveImage(draggedIndex, index);
-        });
+        item.querySelector(".image-preview").addEventListener("load", () => URL.revokeObjectURL(previewUrl), { once: true });
+        item.prepend(dragHandle(`Mover ${image.name}`));
         item.querySelector('[data-action="up"]').addEventListener("click", () => moveImage(index, index - 1));
         item.querySelector('[data-action="down"]').addEventListener("click", () => moveImage(index, index + 1));
         item.querySelector(".remove-button").addEventListener("click", () => {
@@ -61,6 +49,11 @@ function renderImages() {
         imagesList.appendChild(item);
     });
 }
+
+reorderableList(imagesList, {
+    move: moveImage,
+    describe: (index) => selectedImages[index].name,
+});
 
 function moveImage(fromIndex, toIndex) {
     if (fromIndex === null || toIndex < 0 || toIndex >= selectedImages.length || fromIndex === toIndex) return;
@@ -96,7 +89,7 @@ imagesForm.addEventListener("submit", async (event) => {
         imagesInput.value = "";
         imagesOutputName.value = "images.pdf";
         renderImages();
-        setStatus("PDF creado y descargado.", false);
+        setStatus("PDF creado y descargado.", "done");
     } catch (error) {
         setStatus(error.message, true);
     }
