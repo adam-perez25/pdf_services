@@ -111,7 +111,7 @@ def test_pdfa_command_is_sandboxed_and_reads_only_the_profile(client, tmp_path, 
         seen["command"] = command
         seen["timeout"] = timeout
         definition = Path(command[-2])
-        seen["definition"] = definition.read_text(encoding="ascii")
+        seen["definition"] = definition.read_text(encoding="utf-8")
         Path(next(arg for arg in command if arg.startswith("-sOutputFile=")).split("=", 1)[1]).write_bytes(make_pdf(1))
         return subprocess.CompletedProcess(command, 0, "", "")
 

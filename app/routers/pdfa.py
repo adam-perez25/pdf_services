@@ -103,7 +103,7 @@ def ghostscript_rewrite(
             leading_files = []
             if profile is not None:
                 definition = Path(scratch) / "pdfa-definition.ps"
-                definition.write_text(PDFA_DEFINITION.format(profile=postscript_string(profile.as_posix())), encoding="ascii")
+                definition.write_text(PDFA_DEFINITION.format(profile=postscript_string(profile.as_posix())), encoding="utf-8")
                 options = [*options, f"--permit-file-read={profile.as_posix()}"]
                 leading_files = [str(definition)]
             result = external_tools.run_tool(
