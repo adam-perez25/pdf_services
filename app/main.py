@@ -35,34 +35,9 @@ from pypdf import PageObject, PdfReader, PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, FloatObject, NameObject, TextStringObject
 from starlette.background import BackgroundTask
 
-
-def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
-    """Read a whole-number setting from the environment, or use the default.
-
-    A value that is not a number or is out of range stops the service at
-    startup with a clear message, instead of quietly running with a limit
-    nobody chose. The result is stored in a module constant and read at call
-    time, so tests can still monkeypatch the constant.
-    """
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = int(raw)
-    except ValueError:
-        raise ValueError(f"La variable de entorno {name}={raw!r} no es un número entero.") from None
-    if not minimum <= value <= maximum:
-        raise ValueError(
-            f"La variable de entorno {name}={raw!r} debe estar entre {minimum} y {maximum}."
-        )
-    return value
+from app import config
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DOCUMENTS_DIR = Path(tempfile.gettempdir()) / "pdf-toolkit-documents"
-DOCUMENTS_DIR.mkdir(exist_ok=True)
-DOCUMENT_TTL_SECONDS = env_int("DOCUMENT_TTL_SECONDS", 30 * 60, 60, 7 * 24 * 3600)
-DOCUMENT_SWEEP_SECONDS = env_int("DOCUMENT_SWEEP_SECONDS", 5 * 60, 10, 24 * 3600)
 DOCUMENT_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
 PDFIUM_LOCK = threading.Lock()
 THUMBNAIL_WIDTH = 300
@@ -71,15 +46,8 @@ MAX_RENDER_WIDTH = 2000
 # Upload limits: per file, and for all the files of one request (merge, images).
 # They stop accidents and abuse, not big documents: a 1000-page scan is
 # usually a few hundred MB.
-MAX_UPLOAD_MB = env_int("MAX_UPLOAD_MB", 500, 1, 100_000)
 # Unset, the total follows a raised per-file limit instead of stopping startup.
-MAX_TOTAL_UPLOAD_MB = env_int("MAX_TOTAL_UPLOAD_MB", max(1000, MAX_UPLOAD_MB), 1, 100_000)
-if MAX_TOTAL_UPLOAD_MB < MAX_UPLOAD_MB:
-    raise ValueError(
-        f"MAX_TOTAL_UPLOAD_MB ({MAX_TOTAL_UPLOAD_MB}) no puede ser menor que MAX_UPLOAD_MB ({MAX_UPLOAD_MB})."
-    )
 # Extra room in a request for the multipart boundaries and the text fields.
-MULTIPART_OVERHEAD_MB = 1
 logger = logging.getLogger("uvicorn.error")
 
 
@@ -114,11 +82,11 @@ async def validation_error(request, error: RequestValidationError):
 
 
 def max_request_bytes() -> int:
-    return int((MAX_TOTAL_UPLOAD_MB + MULTIPART_OVERHEAD_MB) * 1024 * 1024)
+    return int((config.MAX_TOTAL_UPLOAD_MB + config.MULTIPART_OVERHEAD_MB) * 1024 * 1024)
 
 
 def request_too_big() -> str:
-    return f"La petición supera el límite de {MAX_TOTAL_UPLOAD_MB} MB."
+    return f"La petición supera el límite de {config.MAX_TOTAL_UPLOAD_MB} MB."
 
 
 class UploadSizeLimit:
@@ -234,7 +202,7 @@ app.add_middleware(CrossSiteRequestGuard)
 # The slim image's MIME table has no entry for .woff2, so the bundled fonts
 # would otherwise be served as text/plain.
 mimetypes.add_type("font/woff2", ".woff2")
-app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+app.mount("/static", StaticFiles(directory=config.BASE_DIR / "static"), name="static")
 
 
 @app.middleware("http")
@@ -333,8 +301,8 @@ def health():
     # store uploads; a missing LibreOffice or Ghostscript is reported but only
     # disables the Office conversions or Compress PDF.
     try:
-        DOCUMENTS_DIR.mkdir(exist_ok=True)
-        with tempfile.NamedTemporaryFile(dir=DOCUMENTS_DIR, prefix=".health-"):
+        config.DOCUMENTS_DIR.mkdir(exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=config.DOCUMENTS_DIR, prefix=".health-"):
             pass
         storage_ok = True
     except OSError:
@@ -401,7 +369,7 @@ def kill_process_tree(process: subprocess.Popen) -> None:
 
 
 def render_page(template_name: str) -> HTMLResponse:
-    html = (BASE_DIR / "templates" / template_name).read_text(encoding="utf-8")
+    html = (config.BASE_DIR / "templates" / template_name).read_text(encoding="utf-8")
     return HTMLResponse(html)
 
 
@@ -446,10 +414,10 @@ def check_upload_sizes(files: list[UploadFile]) -> None:
     """Reject the request with 413 if a file or all of them together are too big."""
     megabyte = 1024 * 1024
     sizes = [upload_size(file) for file in files]
-    if any(size > MAX_UPLOAD_MB * megabyte for size in sizes):
-        detail = f"Cada archivo puede ocupar como máximo {MAX_UPLOAD_MB} MB."
-    elif sum(sizes) > MAX_TOTAL_UPLOAD_MB * megabyte:
-        detail = f"Los archivos no pueden ocupar más de {MAX_TOTAL_UPLOAD_MB} MB en total."
+    if any(size > config.MAX_UPLOAD_MB * megabyte for size in sizes):
+        detail = f"Cada archivo puede ocupar como máximo {config.MAX_UPLOAD_MB} MB."
+    elif sum(sizes) > config.MAX_TOTAL_UPLOAD_MB * megabyte:
+        detail = f"Los archivos no pueden ocupar más de {config.MAX_TOTAL_UPLOAD_MB} MB en total."
     else:
         return
     for file in files:
@@ -520,9 +488,9 @@ def protect_from_sweeper(*paths: Path):
 
 
 def new_job_paths(*suffixes: str) -> list[Path]:
-    DOCUMENTS_DIR.mkdir(exist_ok=True)
+    config.DOCUMENTS_DIR.mkdir(exist_ok=True)
     job_id = uuid.uuid4().hex
-    return [DOCUMENTS_DIR / f"{job_id}{suffix}" for suffix in suffixes]
+    return [config.DOCUMENTS_DIR / f"{job_id}{suffix}" for suffix in suffixes]
 
 
 def write_pdf_to_file(writer: PdfWriter) -> Path:
@@ -578,13 +546,10 @@ def file_download(path: Path, filename: str, media_type: str = "application/pdf"
 # (the usual few-MB PDFs) skip the line entirely, so they never wait.
 # The budget leaves about 1 GB of the 3 GB for Python itself, the small jobs
 # that skip the line and estimates that fall short.
-HEAVY_JOB_BUDGET_MB = env_int("HEAVY_JOB_BUDGET_MB", 2000, 100, 1_000_000)
 # How long a request waits for its turn before giving up with a 503.
-HEAVY_JOB_WAIT_SECONDS = env_int("HEAVY_JOB_WAIT_SECONDS", 300, 1, 24 * 3600)
 # At most this many big jobs wait in line; more get a 503 at once. Each waiting
 # request holds one of the server's worker threads (about 40), and /health and
 # the small jobs need some of them too.
-HEAVY_JOB_MAX_WAITING = env_int("HEAVY_JOB_MAX_WAITING", 10, 1, 1000)
 # Jobs estimated below this many MB never wait and reserve nothing.
 HEAVY_JOB_MIN_MB = 100
 # Jobs on files smaller than this (in total) never wait either, whatever the
@@ -708,7 +673,7 @@ def heavy_job(megabytes: int, uploads: list[UploadFile] = ()):
     if megabytes < HEAVY_JOB_MIN_MB:
         yield
         return
-    if not HEAVY_JOBS.acquire(megabytes, HEAVY_JOB_BUDGET_MB, HEAVY_JOB_WAIT_SECONDS, HEAVY_JOB_MAX_WAITING):
+    if not HEAVY_JOBS.acquire(megabytes, config.HEAVY_JOB_BUDGET_MB, config.HEAVY_JOB_WAIT_SECONDS, config.HEAVY_JOB_MAX_WAITING):
         for upload in uploads:
             upload.file.close()
         raise HTTPException(
@@ -1053,7 +1018,7 @@ def split_pdf_zip(
 def get_document_path(document_id: str) -> Path:
     if not DOCUMENT_ID_PATTERN.fullmatch(document_id):
         raise HTTPException(status_code=404, detail="Documento no encontrado.")
-    path = DOCUMENTS_DIR / f"{document_id}.pdf"
+    path = config.DOCUMENTS_DIR / f"{document_id}.pdf"
     try:
         # Refresh the last-use time; unlike Path.touch this never recreates a
         # file that another request has just deleted.
@@ -1082,8 +1047,8 @@ def open_pdfium_document(path: Path) -> pypdfium2.PdfDocument:
 
 def remove_expired_documents(max_age: float | None = None) -> None:
     # Read at call time, so the configured (or monkeypatched) TTL applies.
-    limit = time.time() - (DOCUMENT_TTL_SECONDS if max_age is None else max_age)
-    for path in DOCUMENTS_DIR.iterdir():
+    limit = time.time() - (config.DOCUMENT_TTL_SECONDS if max_age is None else max_age)
+    for path in config.DOCUMENTS_DIR.iterdir():
         # Holding the lock keeps a job from registering a file between the
         # check and the unlink.
         with ACTIVE_JOB_LOCK:
@@ -1099,7 +1064,7 @@ def remove_expired_documents(max_age: float | None = None) -> None:
 
 def sweep_documents_forever() -> None:
     while True:
-        time.sleep(DOCUMENT_SWEEP_SECONDS)
+        time.sleep(config.DOCUMENT_SWEEP_SECONDS)
         try:
             remove_expired_documents()
         except Exception:
@@ -1170,7 +1135,7 @@ def upload_document(file: UploadFile = File(...)):
 
     remove_expired_documents()
     document_id = uuid.uuid4().hex
-    path = DOCUMENTS_DIR / f"{document_id}.pdf"
+    path = config.DOCUMENTS_DIR / f"{document_id}.pdf"
     try:
         with path.open("wb") as destination:
             shutil.copyfileobj(file.file, destination)
@@ -1280,7 +1245,7 @@ def edit_document(
 @app.delete("/api/documents/{document_id}", status_code=204)
 def delete_document(document_id: str):
     if DOCUMENT_ID_PATTERN.fullmatch(document_id):
-        (DOCUMENTS_DIR / f"{document_id}.pdf").unlink(missing_ok=True)
+        (config.DOCUMENTS_DIR / f"{document_id}.pdf").unlink(missing_ok=True)
     return Response(status_code=204)
 
 
@@ -1480,12 +1445,7 @@ MAX_IMAGE_PIXELS = 40_000_000
 # so the default of 10 000 megapixels allows 1000 A4 pages at 300 ppp (8.7 Gpx)
 # or about 4500 at 150 ppp, but rejects 2000 A4 pages at 300 ppp (17.4 Gpx),
 # which would take most of an hour and many GB of temporary disk.
-PDF_TO_IMAGES_MAX_MEGAPIXELS = env_int("PDF_TO_IMAGES_MAX_MEGAPIXELS", 10_000, 1, 1_000_000)
 # Space that must stay free in the temporary folder after the estimated output.
-PDF_TO_IMAGES_MIN_FREE_MB = env_int("PDF_TO_IMAGES_MIN_FREE_MB", 512, 0, 1_000_000)
-PDF_TO_IMAGES_TIMEOUT_SECONDS = env_int("PDF_TO_IMAGES_TIMEOUT_SECONDS", 300, 10, 24 * 3600)
-PDF_TO_IMAGES_SECONDS_PER_PAGE = env_int("PDF_TO_IMAGES_SECONDS_PER_PAGE", 3, 0, 600)
-PDF_TO_IMAGES_MAX_TIMEOUT_SECONDS = env_int("PDF_TO_IMAGES_MAX_TIMEOUT_SECONDS", 7200, 10, 7 * 24 * 3600)
 # Estimated bytes per output pixel, used only for the up-front disk check. A
 # text page takes well under 0.1 byte per pixel in PNG and a scanned or photo
 # page 1-3; 0.5 covers typical mixed documents without rejecting ordinary text
@@ -1495,9 +1455,9 @@ IMAGE_BYTES_PER_PIXEL = {"png": 0.5, "jpg": 0.2}
 
 
 def pdf_to_images_timeout(page_count: int) -> float:
-    scaled = PDF_TO_IMAGES_TIMEOUT_SECONDS + PDF_TO_IMAGES_SECONDS_PER_PAGE * page_count
+    scaled = config.PDF_TO_IMAGES_TIMEOUT_SECONDS + config.PDF_TO_IMAGES_SECONDS_PER_PAGE * page_count
     # The cap never cuts below the base time.
-    return min(scaled, max(PDF_TO_IMAGES_MAX_TIMEOUT_SECONDS, PDF_TO_IMAGES_TIMEOUT_SECONDS))
+    return min(scaled, max(config.PDF_TO_IMAGES_MAX_TIMEOUT_SECONDS, config.PDF_TO_IMAGES_TIMEOUT_SECONDS))
 
 
 def render_scale(width: float, height: float, dpi: int) -> float:
@@ -1572,24 +1532,24 @@ def check_pdf_to_images_budget(total_pixels: float, page_total: int, dpi: int, i
         raise HTTPException(status_code=400, detail="El PDF tiene páginas con un tamaño no válido.")
     estimated_bytes = total_pixels * IMAGE_BYTES_PER_PIXEL[image_format]
     request = f"Convertir {'1 página' if page_total == 1 else f'{page_total} páginas'} a {dpi} ppp"
-    if total_pixels > PDF_TO_IMAGES_MAX_MEGAPIXELS * 1_000_000:
+    if total_pixels > config.PDF_TO_IMAGES_MAX_MEGAPIXELS * 1_000_000:
         raise HTTPException(
             status_code=400,
             detail=(
                 f"{request} daría unos {format_megapixels_es(total_pixels)} millones de "
                 f"píxeles (unos {format_size_es(estimated_bytes)} de imágenes), más del máximo "
-                f"de {format_megapixels_es(PDF_TO_IMAGES_MAX_MEGAPIXELS * 1_000_000)} millones. "
+                f"de {format_megapixels_es(config.PDF_TO_IMAGES_MAX_MEGAPIXELS * 1_000_000)} millones. "
                 "Elige menos páginas o una resolución menor."
             ),
         )
-    free = shutil.disk_usage(DOCUMENTS_DIR).free
-    if estimated_bytes + PDF_TO_IMAGES_MIN_FREE_MB * 1024 * 1024 > free:
+    free = shutil.disk_usage(config.DOCUMENTS_DIR).free
+    if estimated_bytes + config.PDF_TO_IMAGES_MIN_FREE_MB * 1024 * 1024 > free:
         raise HTTPException(
             status_code=507,
             detail=(
                 f"{request} ocuparía unos {format_size_es(estimated_bytes)} y no hay espacio "
                 f"suficiente en el disco temporal del servidor ({format_size_es(free)} libres, "
-                f"de los que se reservan {format_size_es(PDF_TO_IMAGES_MIN_FREE_MB * 1024 * 1024)}). "
+                f"de los que se reservan {format_size_es(config.PDF_TO_IMAGES_MIN_FREE_MB * 1024 * 1024)}). "
                 "Elige menos páginas, una resolución menor o el formato JPG."
             ),
         )
@@ -1758,7 +1718,6 @@ def powerpoint_to_pdf(
     return convert_office_to_pdf(file, output_name, {".ppt", ".pptx"}, "PPT o PPTX", "PowerPoint")
 
 
-OFFICE_TIMEOUT_SECONDS = env_int("OFFICE_TIMEOUT_SECONDS", 300, 10, 24 * 3600)
 # The English defaults the pages used to send; they now mean "name it after
 # the uploaded file", like an empty name.
 OFFICE_OLD_DEFAULT_NAMES = {"document.pdf", "spreadsheet.pdf", "presentation.pdf"}
@@ -1886,7 +1845,7 @@ def convert_office_to_pdf(
                     str(temporary_path),
                     str(input_path),
                 ],
-                timeout=OFFICE_TIMEOUT_SECONDS,
+                timeout=config.OFFICE_TIMEOUT_SECONDS,
             )
             output_path = temporary_path / "source.pdf"
             if result.returncode != 0 or not output_path.exists():
@@ -1917,9 +1876,6 @@ COMPRESSION_LEVELS = {
 }
 # Ghostscript's time grows with the page count, so the timeout does too:
 # base + per page, capped. 20 pages get 640 s, 1000 pages 2600 s.
-COMPRESSION_TIMEOUT_SECONDS = env_int("COMPRESSION_TIMEOUT_SECONDS", 600, 10, 24 * 3600)
-COMPRESSION_SECONDS_PER_PAGE = env_int("COMPRESSION_SECONDS_PER_PAGE", 2, 0, 600)
-COMPRESSION_MAX_TIMEOUT_SECONDS = env_int("COMPRESSION_MAX_TIMEOUT_SECONDS", 3600, 10, 7 * 24 * 3600)
 
 
 # pdfium accepts the %PDF- header anywhere in the first 1024 bytes, but
@@ -1957,9 +1913,9 @@ def strip_before_pdf_header(path: Path) -> None:
 
 
 def compression_timeout(page_count: int) -> float:
-    scaled = COMPRESSION_TIMEOUT_SECONDS + COMPRESSION_SECONDS_PER_PAGE * page_count
+    scaled = config.COMPRESSION_TIMEOUT_SECONDS + config.COMPRESSION_SECONDS_PER_PAGE * page_count
     # The cap never cuts below the base timeout.
-    return min(scaled, max(COMPRESSION_MAX_TIMEOUT_SECONDS, COMPRESSION_TIMEOUT_SECONDS))
+    return min(scaled, max(config.COMPRESSION_MAX_TIMEOUT_SECONDS, config.COMPRESSION_TIMEOUT_SECONDS))
 
 
 @app.post("/api/compress")
@@ -2683,10 +2639,10 @@ def extract_text(
 
     # Both files live in the documents folder, so the regular sweep removes
     # them if the server stops halfway; normally they are deleted once sent.
-    DOCUMENTS_DIR.mkdir(exist_ok=True)
+    config.DOCUMENTS_DIR.mkdir(exist_ok=True)
     job_id = uuid.uuid4().hex
-    input_path = DOCUMENTS_DIR / f"{job_id}.in.pdf"
-    text_path = DOCUMENTS_DIR / f"{job_id}.txt"
+    input_path = config.DOCUMENTS_DIR / f"{job_id}.in.pdf"
+    text_path = config.DOCUMENTS_DIR / f"{job_id}.txt"
 
     def remove_job_files():
         input_path.unlink(missing_ok=True)
@@ -3007,10 +2963,6 @@ OCR_LANGUAGES = {"spa", "eng", "spa+eng"}
 OCR_JOBS = 2  # Tesseract workers per request, so one OCR does not take every core
 # Big scans are allowed: the limits are settings like the other ones, and the
 # cap (4 h by default) covers about 700 pages at the slow 20 s per page.
-OCR_MAX_PAGES = env_int("OCR_MAX_PAGES", 2000, 1, 100_000)
-OCR_TIMEOUT_BASE_SECONDS = env_int("OCR_TIMEOUT_SECONDS", 60, 10, 24 * 3600)
-OCR_TIMEOUT_PER_PAGE_SECONDS = env_int("OCR_SECONDS_PER_PAGE", 20, 0, 3600)
-OCR_TIMEOUT_MAX_SECONDS = env_int("OCR_MAX_TIMEOUT_SECONDS", 4 * 3600, 10, 7 * 24 * 3600)
 OCR_EXIT_ENCRYPTED = 8
 OCR_EXIT_MISSING_DEPENDENCY = 3
 OCR_EXIT_INVALID_CONFIG = 9  # e.g. a Tesseract language pack is missing
@@ -3030,7 +2982,7 @@ def ocr_available() -> bool:
 
 
 def ocr_timeout(page_count: int) -> float:
-    return min(OCR_TIMEOUT_BASE_SECONDS + OCR_TIMEOUT_PER_PAGE_SECONDS * page_count, OCR_TIMEOUT_MAX_SECONDS)
+    return min(config.OCR_TIMEOUT_BASE_SECONDS + config.OCR_TIMEOUT_PER_PAGE_SECONDS * page_count, config.OCR_TIMEOUT_MAX_SECONDS)
 
 
 def page_list(numbers: list[int]) -> str:
@@ -3137,10 +3089,10 @@ def ocr_pdf(
 
     # Same layout as Compress: both files live in the documents folder, so the
     # sweep removes them if the server stops halfway.
-    DOCUMENTS_DIR.mkdir(exist_ok=True)
+    config.DOCUMENTS_DIR.mkdir(exist_ok=True)
     job_id = uuid.uuid4().hex
-    input_path = DOCUMENTS_DIR / f"{job_id}.in.pdf"
-    output_path = DOCUMENTS_DIR / f"{job_id}.out.pdf"
+    input_path = config.DOCUMENTS_DIR / f"{job_id}.in.pdf"
+    output_path = config.DOCUMENTS_DIR / f"{job_id}.out.pdf"
 
     def remove_job_files():
         input_path.unlink(missing_ok=True)
@@ -3158,13 +3110,13 @@ def ocr_pdf(
                 document = open_pdfium_checked(input_path)
                 try:
                     page_count = len(document)
-                    image_pages = pages_with_images(document) if page_count <= OCR_MAX_PAGES else []
+                    image_pages = pages_with_images(document) if page_count <= config.OCR_MAX_PAGES else []
                 finally:
                     document.close()
-            if page_count > OCR_MAX_PAGES:
+            if page_count > config.OCR_MAX_PAGES:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"El OCR admite como máximo {OCR_MAX_PAGES} páginas por documento.",
+                    detail=f"El OCR admite como máximo {config.OCR_MAX_PAGES} páginas por documento.",
                 )
             if image_pages and has_form_fields(input_path):
                 image_pages = []

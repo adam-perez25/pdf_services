@@ -6,6 +6,7 @@ from pypdf import PdfReader
 import pytest
 
 import app.main as main
+import app.config as config
 
 
 @pytest.fixture
@@ -13,7 +14,7 @@ def documents_dir(tmp_path, monkeypatch):
     # Keep uploaded documents out of the real temporary folder.
     path = tmp_path / "documents"
     path.mkdir()
-    monkeypatch.setattr(main, "DOCUMENTS_DIR", path)
+    monkeypatch.setattr(config, "DOCUMENTS_DIR", path)
     return path
 
 

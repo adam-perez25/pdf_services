@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 import app.main as main
+import app.config as config
 from conftest import make_pdf
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -111,12 +112,12 @@ def test_a_job_that_gives_up_lets_the_next_one_go():
 def limiter(monkeypatch):
     fresh = main.HeavyJobLimiter()
     monkeypatch.setattr(main, "HEAVY_JOBS", fresh)
-    monkeypatch.setattr(main, "HEAVY_JOB_BUDGET_MB", 1000)
+    monkeypatch.setattr(config, "HEAVY_JOB_BUDGET_MB", 1000)
     return fresh
 
 
 def test_heavy_job_answers_503_after_waiting_too_long(limiter, monkeypatch):
-    monkeypatch.setattr(main, "HEAVY_JOB_WAIT_SECONDS", 0)
+    monkeypatch.setattr(config, "HEAVY_JOB_WAIT_SECONDS", 0)
 
     class Upload:
         file = BytesIO(b"x")
@@ -143,7 +144,7 @@ def test_heavy_job_releases_its_share_when_the_job_fails(limiter):
 
 
 def test_small_jobs_skip_the_line(limiter, monkeypatch):
-    monkeypatch.setattr(main, "HEAVY_JOB_WAIT_SECONDS", 0)
+    monkeypatch.setattr(config, "HEAVY_JOB_WAIT_SECONDS", 0)
     with main.heavy_job(5000):
         with main.heavy_job(main.HEAVY_JOB_MIN_MB - 1), main.heavy_job(1):
             assert limiter.status() == {"running": 1, "reserved_mb": 5000, "waiting": 0}
@@ -168,7 +169,7 @@ def test_estimates():
 def import_heavy_settings(**env: str) -> subprocess.CompletedProcess:
     names = ["HEAVY_JOB_BUDGET_MB", "HEAVY_JOB_WAIT_SECONDS"]
     clean = {key: value for key, value in os.environ.items() if key not in names}
-    code = f"import json, app.main as m; print(json.dumps([getattr(m, n) for n in {names!r}]))"
+    code = f"import json, app.main, app.config as m; print(json.dumps([getattr(m, n) for n in {names!r}]))"
     return subprocess.run(
         [sys.executable, "-c", code], cwd=ROOT, env={**clean, **env},
         capture_output=True, text=True, timeout=120,
@@ -177,7 +178,7 @@ def import_heavy_settings(**env: str) -> subprocess.CompletedProcess:
 
 def test_settings_defaults_and_overrides():
     if "HEAVY_JOB_BUDGET_MB" not in os.environ and "HEAVY_JOB_WAIT_SECONDS" not in os.environ:
-        assert (main.HEAVY_JOB_BUDGET_MB, main.HEAVY_JOB_WAIT_SECONDS) == (2000, 300)
+        assert (config.HEAVY_JOB_BUDGET_MB, config.HEAVY_JOB_WAIT_SECONDS) == (2000, 300)
 
     custom = import_heavy_settings(HEAVY_JOB_BUDGET_MB="2500", HEAVY_JOB_WAIT_SECONDS="60")
     assert custom.returncode == 0, custom.stderr
@@ -242,7 +243,7 @@ def test_second_big_request_gets_503_while_the_first_runs(client, sample_pdf, sl
     files = [("files", ("a.pdf", sample_pdf, "application/pdf"))]
     assert client.post("/api/merge", files=files).status_code == 200
 
-    monkeypatch.setattr(main, "HEAVY_JOB_WAIT_SECONDS", 0)
+    monkeypatch.setattr(config, "HEAVY_JOB_WAIT_SECONDS", 0)
     busy = post_compress(sample_pdf)
     assert busy.status_code == 503
     assert busy.json()["detail"] == main.HEAVY_JOB_BUSY_MESSAGE

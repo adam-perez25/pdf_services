@@ -14,6 +14,7 @@ from pypdf import PdfReader, PdfWriter
 import pytest
 
 import app.main as main
+import app.config as config
 
 
 PAGE_COUNT = 1500
@@ -160,7 +161,7 @@ def test_protect_and_unlock(client, large_pdf, documents_dir):
 # --- Sweeper and in-flight jobs ---------------------------------------------
 
 def make_old(path: Path) -> None:
-    old = time.time() - main.DOCUMENT_TTL_SECONDS - 60
+    old = time.time() - config.DOCUMENT_TTL_SECONDS - 60
     os.utime(path, (old, old))
 
 
@@ -178,7 +179,7 @@ def test_pdf_to_images_selected_pages_of_a_long_pdf(client, large_pdf, documents
 def test_pdf_to_images_long_pdf_over_the_pixel_cap_is_rejected_up_front(
     client, large_pdf, documents_dir, monkeypatch,
 ):
-    monkeypatch.setattr(main, "PDF_TO_IMAGES_MAX_MEGAPIXELS", 1000)
+    monkeypatch.setattr(config, "PDF_TO_IMAGES_MAX_MEGAPIXELS", 1000)
     rendered = []
     monkeypatch.setattr(main.pypdfium2.PdfPage, "render", lambda *args, **kwargs: rendered.append(1))
 
@@ -273,9 +274,9 @@ def test_slow_split_zip_survives_a_sweep(client, large_pdf, documents_dir, monke
 # --- Timeouts ----------------------------------------------------------------
 
 def test_compression_timeout_scales_with_pages(monkeypatch):
-    monkeypatch.setattr(main, "COMPRESSION_TIMEOUT_SECONDS", 600)
-    monkeypatch.setattr(main, "COMPRESSION_SECONDS_PER_PAGE", 2)
-    monkeypatch.setattr(main, "COMPRESSION_MAX_TIMEOUT_SECONDS", 3600)
+    monkeypatch.setattr(config, "COMPRESSION_TIMEOUT_SECONDS", 600)
+    monkeypatch.setattr(config, "COMPRESSION_SECONDS_PER_PAGE", 2)
+    monkeypatch.setattr(config, "COMPRESSION_MAX_TIMEOUT_SECONDS", 3600)
 
     assert main.compression_timeout(20) == 640
     assert main.compression_timeout(1000) == 2600
@@ -283,8 +284,8 @@ def test_compression_timeout_scales_with_pages(monkeypatch):
 
 
 def test_compression_timeout_cap_never_cuts_below_the_base(monkeypatch):
-    monkeypatch.setattr(main, "COMPRESSION_TIMEOUT_SECONDS", 900)
-    monkeypatch.setattr(main, "COMPRESSION_MAX_TIMEOUT_SECONDS", 300)
+    monkeypatch.setattr(config, "COMPRESSION_TIMEOUT_SECONDS", 900)
+    monkeypatch.setattr(config, "COMPRESSION_MAX_TIMEOUT_SECONDS", 300)
 
     assert main.compression_timeout(1000) == 900
 
@@ -293,21 +294,21 @@ def test_compression_timeout_cap_never_cuts_below_the_base(monkeypatch):
 
 def test_env_int_uses_the_default_when_unset_or_empty(monkeypatch):
     monkeypatch.delenv("PDF_TEST_SETTING", raising=False)
-    assert main.env_int("PDF_TEST_SETTING", 42, 1, 100) == 42
+    assert config.env_int("PDF_TEST_SETTING", 42, 1, 100) == 42
     monkeypatch.setenv("PDF_TEST_SETTING", "  ")
-    assert main.env_int("PDF_TEST_SETTING", 42, 1, 100) == 42
+    assert config.env_int("PDF_TEST_SETTING", 42, 1, 100) == 42
 
 
 def test_env_int_reads_a_valid_value(monkeypatch):
     monkeypatch.setenv("PDF_TEST_SETTING", " 75 ")
-    assert main.env_int("PDF_TEST_SETTING", 42, 1, 100) == 75
+    assert config.env_int("PDF_TEST_SETTING", 42, 1, 100) == 75
 
 
 @pytest.mark.parametrize("value, message", [("500MB", "no es un número entero"), ("1.5", "no es un número entero"), ("0", "entre 1 y 100"), ("101", "entre 1 y 100")])
 def test_env_int_rejects_bad_values_clearly(monkeypatch, value, message):
     monkeypatch.setenv("PDF_TEST_SETTING", value)
     with pytest.raises(ValueError) as error:
-        main.env_int("PDF_TEST_SETTING", 42, 1, 100)
+        config.env_int("PDF_TEST_SETTING", 42, 1, 100)
     assert "PDF_TEST_SETTING" in str(error.value)
     assert message in str(error.value)
 
@@ -323,9 +324,10 @@ SETTINGS = [
 
 
 def import_settings(**env: str) -> subprocess.CompletedProcess:
-    """Import app.main in a fresh interpreter with the given variables set."""
+    """Import app.main in a fresh interpreter with the given variables set
+    and read the settings from app.config."""
     clean = {key: value for key, value in os.environ.items() if key not in SETTINGS}
-    code = f"import json, app.main as m; print(json.dumps({{name: getattr(m, name) for name in {SETTINGS!r}}}))"
+    code = f"import json, app.main, app.config as m; print(json.dumps({{name: getattr(m, name) for name in {SETTINGS!r}}}))"
     return subprocess.run(
         [sys.executable, "-c", code], cwd=ROOT, env={**clean, **env},
         capture_output=True, text=True, timeout=120,
@@ -406,19 +408,19 @@ def pdf_over_old_limit() -> bytes:
 def test_configured_limits_are_respected(client, monkeypatch, pdf_over_old_limit):
     files = {"file": ("grande.pdf", pdf_over_old_limit, "application/pdf")}
 
-    monkeypatch.setattr(main, "MAX_UPLOAD_MB", 100)
-    monkeypatch.setattr(main, "MAX_TOTAL_UPLOAD_MB", 100)
+    monkeypatch.setattr(config, "MAX_UPLOAD_MB", 100)
+    monkeypatch.setattr(config, "MAX_TOTAL_UPLOAD_MB", 100)
     accepted = client.post("/api/pdf-info", files=files)
     assert accepted.status_code == 200
     assert accepted.json() == {"pages": 1}
 
-    monkeypatch.setattr(main, "MAX_UPLOAD_MB", 50)
+    monkeypatch.setattr(config, "MAX_UPLOAD_MB", 50)
     rejected = client.post("/api/pdf-info", files=files)
     assert rejected.status_code == 413
     assert "50 MB" in rejected.json()["detail"]
 
     # The request-size middleware follows MAX_TOTAL_UPLOAD_MB too.
-    monkeypatch.setattr(main, "MAX_TOTAL_UPLOAD_MB", 40)
+    monkeypatch.setattr(config, "MAX_TOTAL_UPLOAD_MB", 40)
     cut_off = client.post("/api/pdf-info", files=files)
     assert cut_off.status_code == 413
     assert "40 MB" in cut_off.json()["detail"]

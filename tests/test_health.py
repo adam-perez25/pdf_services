@@ -1,4 +1,5 @@
 import app.main as main
+import app.config as config
 
 
 def test_health_reports_ok(client):
@@ -22,7 +23,7 @@ def test_health_fails_when_storage_is_unusable(client, tmp_path, monkeypatch):
     # A regular file where the folder should be makes uploads impossible.
     blocked = tmp_path / "not-a-folder"
     blocked.write_text("x")
-    monkeypatch.setattr(main, "DOCUMENTS_DIR", blocked)
+    monkeypatch.setattr(config, "DOCUMENTS_DIR", blocked)
 
     response = client.get("/health")
 

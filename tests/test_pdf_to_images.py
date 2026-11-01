@@ -6,6 +6,7 @@ from PIL import Image
 import pytest
 
 import app.main as main
+import app.config as config
 from conftest import make_pdf
 
 
@@ -140,7 +141,7 @@ def test_invalid_page_ranges_are_rejected(client, sample_pdf, documents_dir, pag
 def test_too_many_pixels_are_rejected_before_rendering(client, sample_pdf, documents_dir, monkeypatch):
     rendered = []
     monkeypatch.setattr(main, "render_scale", lambda *args: rendered.append(args) or 300 / 72)
-    monkeypatch.setattr(main, "PDF_TO_IMAGES_MAX_MEGAPIXELS", 1)
+    monkeypatch.setattr(config, "PDF_TO_IMAGES_MAX_MEGAPIXELS", 1)
 
     # 4 pages of 1000 x 300 points in total at 300 ppp: about 5.2 megapixels.
     response = convert(client, sample_pdf, dpi="300")
@@ -156,7 +157,7 @@ def test_too_many_pixels_are_rejected_before_rendering(client, sample_pdf, docum
 
 
 def test_pixel_cap_counts_only_the_selected_pages_and_dpi(client, sample_pdf, monkeypatch):
-    monkeypatch.setattr(main, "PDF_TO_IMAGES_MAX_MEGAPIXELS", 1)
+    monkeypatch.setattr(config, "PDF_TO_IMAGES_MAX_MEGAPIXELS", 1)
 
     assert convert(client, sample_pdf, dpi="72").status_code == 200  # 0.3 Mpx
     assert convert(client, sample_pdf, dpi="300", pages="1").status_code == 200  # 0.5 Mpx
@@ -166,7 +167,7 @@ def test_estimate_respects_the_per_image_pixel_limit(client, monkeypatch):
     # Pages are rendered at no more than MAX_IMAGE_PIXELS, so a huge page
     # counts as that size in the estimate.
     monkeypatch.setattr(main, "MAX_IMAGE_PIXELS", 10_000)
-    monkeypatch.setattr(main, "PDF_TO_IMAGES_MAX_MEGAPIXELS", 1)
+    monkeypatch.setattr(config, "PDF_TO_IMAGES_MAX_MEGAPIXELS", 1)
 
     assert convert(client, make_pdf(4), dpi="300").status_code == 200
 
@@ -219,14 +220,14 @@ def test_time_limit_does_not_cut_a_single_page(client, sample_pdf, monkeypatch):
 
 
 def test_timeout_scales_with_pages_and_is_capped(monkeypatch):
-    monkeypatch.setattr(main, "PDF_TO_IMAGES_TIMEOUT_SECONDS", 300)
-    monkeypatch.setattr(main, "PDF_TO_IMAGES_SECONDS_PER_PAGE", 3)
-    monkeypatch.setattr(main, "PDF_TO_IMAGES_MAX_TIMEOUT_SECONDS", 7200)
+    monkeypatch.setattr(config, "PDF_TO_IMAGES_TIMEOUT_SECONDS", 300)
+    monkeypatch.setattr(config, "PDF_TO_IMAGES_SECONDS_PER_PAGE", 3)
+    monkeypatch.setattr(config, "PDF_TO_IMAGES_MAX_TIMEOUT_SECONDS", 7200)
 
     assert main.pdf_to_images_timeout(20) == 360
     assert main.pdf_to_images_timeout(1000) == 3300
     assert main.pdf_to_images_timeout(5000) == 7200
-    monkeypatch.setattr(main, "PDF_TO_IMAGES_MAX_TIMEOUT_SECONDS", 10)
+    monkeypatch.setattr(config, "PDF_TO_IMAGES_MAX_TIMEOUT_SECONDS", 10)
     assert main.pdf_to_images_timeout(5000) == 300  # never below the base
 
 

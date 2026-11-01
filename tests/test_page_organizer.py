@@ -8,6 +8,7 @@ from PIL import Image
 import pytest
 
 import app.main as main
+import app.config as config
 from conftest import page_layout
 
 
@@ -119,7 +120,7 @@ def test_delete_document(client, sample_pdf, documents_dir):
 
 def test_expired_documents_are_swept(client, sample_pdf, documents_dir):
     old_id, recent_id = upload(client, sample_pdf), upload(client, sample_pdf)
-    old = time.time() - main.DOCUMENT_TTL_SECONDS - 1
+    old = time.time() - config.DOCUMENT_TTL_SECONDS - 1
     os.utime(documents_dir / f"{old_id}.pdf", (old, old))
 
     main.remove_expired_documents()
@@ -130,7 +131,7 @@ def test_expired_documents_are_swept(client, sample_pdf, documents_dir):
 
 def test_startup_purges_leftovers(documents_dir, monkeypatch):
     (documents_dir / f"{'a' * 32}.pdf").write_bytes(b"left from a previous run")
-    monkeypatch.setattr(main, "DOCUMENT_SWEEP_SECONDS", 3600)
+    monkeypatch.setattr(config, "DOCUMENT_SWEEP_SECONDS", 3600)
 
     with TestClient(main.app):
         assert list(documents_dir.iterdir()) == []

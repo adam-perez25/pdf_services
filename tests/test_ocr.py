@@ -9,6 +9,7 @@ from pypdf import PdfReader, PdfWriter
 import pytest
 
 import app.main as main
+import app.config as config
 from conftest import make_pdf
 
 needs_tesseract = pytest.mark.skipif(not main.ocr_available(), reason="ocrmypdf or Tesseract is not installed")
@@ -135,7 +136,7 @@ def test_encrypted_pdf_is_rejected(client, ocr_ready, documents_dir):
 
 
 def test_too_many_pages_is_rejected(client, ocr_ready, monkeypatch, documents_dir):
-    monkeypatch.setattr(main, "OCR_MAX_PAGES", 2)
+    monkeypatch.setattr(config, "OCR_MAX_PAGES", 2)
 
     response = ocr(client, make_pdf(3))
 
@@ -203,7 +204,7 @@ def test_timeout_is_reported(client, ocr_ready, monkeypatch, documents_dir):
 
 def test_timeout_grows_with_pages_and_is_capped():
     assert main.ocr_timeout(1) < main.ocr_timeout(10)
-    assert main.ocr_timeout(10_000) == main.OCR_TIMEOUT_MAX_SECONDS
+    assert main.ocr_timeout(10_000) == config.OCR_TIMEOUT_MAX_SECONDS
 
 
 def test_long_ocr_survives_a_sweep(client, ocr_ready, monkeypatch, documents_dir):
@@ -214,7 +215,7 @@ def test_long_ocr_survives_a_sweep(client, ocr_ready, monkeypatch, documents_dir
     def slow_run_tool(command, timeout, env=None):
         source, output = Path(command[-2]), Path(command[-1])
         output.write_bytes(source.read_bytes())
-        old = time.time() - main.DOCUMENT_TTL_SECONDS - 60
+        old = time.time() - config.DOCUMENT_TTL_SECONDS - 60
         for path in documents_dir.iterdir():
             os.utime(path, (old, old))
         main.remove_expired_documents()
@@ -231,7 +232,7 @@ def test_long_ocr_survives_a_sweep(client, ocr_ready, monkeypatch, documents_dir
 
 
 def test_ocr_limits_allow_big_scans():
-    assert main.OCR_MAX_PAGES >= 1000
+    assert config.OCR_MAX_PAGES >= 1000
     assert main.ocr_timeout(500) > 60 * 60
 
 

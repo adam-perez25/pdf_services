@@ -5,6 +5,7 @@ from pypdf import PdfReader, PdfWriter
 import pytest
 
 import app.main as main
+import app.config as config
 from conftest import make_pdf, make_png
 
 
@@ -22,8 +23,8 @@ def make_encrypted_pdf(user_password: str = "secreto", owner_password: str | Non
 @pytest.fixture
 def small_limits(monkeypatch):
     # 0.01 MB is about 10 KB: a sample PDF fits, a padded one does not.
-    monkeypatch.setattr(main, "MAX_UPLOAD_MB", 0.01)
-    monkeypatch.setattr(main, "MAX_TOTAL_UPLOAD_MB", 0.015)
+    monkeypatch.setattr(config, "MAX_UPLOAD_MB", 0.01)
+    monkeypatch.setattr(config, "MAX_TOTAL_UPLOAD_MB", 0.015)
 
 
 BIG_PDF = make_pdf(1) + b"%" + b"x" * 20_000
@@ -79,8 +80,8 @@ def test_merge_rejects_one_too_big_file(client, small_limits):
 
 def test_merge_rejects_too_big_total(client, monkeypatch):
     pdf = make_pdf(1)
-    monkeypatch.setattr(main, "MAX_UPLOAD_MB", 1)
-    monkeypatch.setattr(main, "MAX_TOTAL_UPLOAD_MB", len(pdf) * 2.5 / (1024 * 1024))
+    monkeypatch.setattr(config, "MAX_UPLOAD_MB", 1)
+    monkeypatch.setattr(config, "MAX_TOTAL_UPLOAD_MB", len(pdf) * 2.5 / (1024 * 1024))
 
     response = client.post(
         "/api/merge",
@@ -93,7 +94,7 @@ def test_merge_rejects_too_big_total(client, monkeypatch):
 
 def test_images_to_pdf_rejects_too_big_total(client, monkeypatch):
     png = make_png()
-    monkeypatch.setattr(main, "MAX_TOTAL_UPLOAD_MB", len(png) * 1.5 / (1024 * 1024))
+    monkeypatch.setattr(config, "MAX_TOTAL_UPLOAD_MB", len(png) * 1.5 / (1024 * 1024))
 
     response = client.post(
         "/api/images-to-pdf",
@@ -210,7 +211,7 @@ def test_pdf_with_only_owner_password_still_works(client):
 
 def test_too_big_content_length_is_rejected_before_reading(client, monkeypatch):
     # Limit is MAX_TOTAL_UPLOAD_MB + MULTIPART_OVERHEAD_MB (1 MB) = ~1.01 MB.
-    monkeypatch.setattr(main, "MAX_TOTAL_UPLOAD_MB", 0.01)
+    monkeypatch.setattr(config, "MAX_TOTAL_UPLOAD_MB", 0.01)
     body = make_pdf(1) + b"%" + b"x" * (1_200_000)
 
     response = client.post("/api/pdf-info", files={"file": ("big.pdf", body, "application/pdf")})
@@ -221,7 +222,7 @@ def test_too_big_content_length_is_rejected_before_reading(client, monkeypatch):
 
 
 def test_chunked_upload_is_cut_off_at_the_limit(client, monkeypatch):
-    monkeypatch.setattr(main, "MAX_TOTAL_UPLOAD_MB", 0.01)
+    monkeypatch.setattr(config, "MAX_TOTAL_UPLOAD_MB", 0.01)
     chunks_sent = []
 
     def body():
