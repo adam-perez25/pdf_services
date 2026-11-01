@@ -5,7 +5,6 @@ import sys
 
 import pytest
 
-import app.main as main
 import app.external_tools as external_tools
 
 

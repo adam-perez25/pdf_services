@@ -5,8 +5,8 @@ from PIL import Image
 from pypdf import PdfReader
 import pytest
 
-import app.main as main
 import app.config as config
+import app.main as main
 
 
 @pytest.fixture

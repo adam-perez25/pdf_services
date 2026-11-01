@@ -4,7 +4,6 @@ from io import BytesIO
 
 import pytest
 
-import app.main as main
 import app.external_tools as external_tools
 from conftest import make_pdf, make_png, page_layout
 

@@ -4,7 +4,6 @@ import logging
 from pypdf import PdfReader, PdfWriter
 import pytest
 
-import app.main as main
 import app.config as config
 import app.errors as errors
 import app.external_tools as external_tools

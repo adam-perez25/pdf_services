@@ -6,8 +6,8 @@ from openpyxl import Workbook
 from pptx import Presentation
 import pytest
 
-import app.main as main
 import app.external_tools as external_tools
+import app.routers.office as office_router
 from conftest import make_pdf, page_layout
 
 
@@ -155,7 +155,7 @@ def test_office_pages_prefill_the_name_from_the_file():
     assert "officeOutputName.value = `${file.name" in script
     for page in ("word", "excel", "powerpoint"):
         html = (root / "templates" / f"{page}.html").read_text(encoding="utf-8")
-        assert not any(old in html for old in main.OFFICE_OLD_DEFAULT_NAMES)
+        assert not any(old in html for old in office_router.OFFICE_OLD_DEFAULT_NAMES)
 
 
 @needs_libreoffice

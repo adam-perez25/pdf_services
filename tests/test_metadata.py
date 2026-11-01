@@ -3,7 +3,6 @@ from io import BytesIO
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import DecodedStreamObject, NameObject
 
-import app.main as main
 import app.routers.metadata as metadata_router
 from conftest import make_pdf
 

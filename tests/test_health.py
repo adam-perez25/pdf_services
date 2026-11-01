@@ -1,4 +1,3 @@
-import app.main as main
 import app.config as config
 import app.external_tools as external_tools
 

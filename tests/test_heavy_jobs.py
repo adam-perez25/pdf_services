@@ -14,11 +14,11 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 import pytest
 
-import app.main as main
 import app.config as config
 import app.documents as documents
 import app.external_tools as external_tools
 import app.heavy_jobs as heavy_jobs
+import app.main as main
 from conftest import make_pdf
 
 ROOT = Path(__file__).resolve().parent.parent

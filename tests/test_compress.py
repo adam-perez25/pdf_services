@@ -4,8 +4,8 @@ from PIL import Image
 from pypdf import PdfReader
 import pytest
 
-import app.main as main
 import app.external_tools as external_tools
+import app.routers.compress as compress_router
 from conftest import make_pdf
 
 needs_ghostscript = pytest.mark.skipif(external_tools.find_ghostscript() is None, reason="Ghostscript is not installed")
@@ -44,7 +44,7 @@ def test_scanned_pdf_gets_much_smaller(client, scanned_pdf):
 
 @needs_ghostscript
 def test_stronger_levels_give_smaller_files(client, scanned_pdf):
-    sizes = {level: len(compress(client, scanned_pdf, level=level).content) for level in main.COMPRESSION_LEVELS}
+    sizes = {level: len(compress(client, scanned_pdf, level=level).content) for level in compress_router.COMPRESSION_LEVELS}
 
     assert sizes["strong"] < sizes["recommended"] < sizes["high"]
 

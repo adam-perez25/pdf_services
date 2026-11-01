@@ -6,7 +6,6 @@ import pypdfium2
 from pypdf import PdfReader, PdfWriter
 import pytest
 
-import app.main as main
 import app.external_tools as external_tools
 import app.pdf_helpers as pdf_helpers
 import app.routers.sign as sign_router

@@ -4,7 +4,6 @@ from pypdf import PdfReader, PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 import pytest
 
-import app.main as main
 import app.errors as errors
 from conftest import make_pdf
 

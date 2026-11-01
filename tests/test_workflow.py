@@ -5,8 +5,8 @@ import re
 from pypdf import PdfReader, PdfWriter
 import pytest
 
-import app.main as main
 import app.external_tools as external_tools
+import app.main as main
 from conftest import make_pdf
 
 ROOT = Path(__file__).resolve().parent.parent

@@ -4,7 +4,6 @@ from PIL import Image
 from pypdf import PdfReader
 import pytest
 
-import app.main as main
 import app.external_tools as external_tools
 import app.pdf_helpers as pdf_helpers
 

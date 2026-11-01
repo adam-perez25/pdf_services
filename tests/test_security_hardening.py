@@ -13,7 +13,6 @@ from PIL import Image
 from pypdf import PageObject, PdfReader, PdfWriter
 import pytest
 
-import app.main as main
 import app.documents as documents
 import app.errors as errors
 import app.external_tools as external_tools

@@ -13,11 +13,11 @@ import zipfile
 from pypdf import PdfReader, PdfWriter
 import pytest
 
-import app.main as main
 import app.config as config
 import app.documents as documents
 import app.external_tools as external_tools
 import app.pdf_helpers as pdf_helpers
+import app.routers.compress as compress_router
 import app.routers.split as split_router
 import app.uploads as uploads
 
@@ -243,7 +243,7 @@ def test_slow_compression_survives_a_sweep(client, large_pdf, documents_dir, mon
     assert response.status_code == 200
     assert response.headers["x-compression-applied"] == "true"
     assert len(calls["left"]) == 2  # <job>.in.pdf and <job>.out.pdf survived
-    assert calls["timeout"] == main.compression_timeout(PAGE_COUNT)
+    assert calls["timeout"] == compress_router.compression_timeout(PAGE_COUNT)
     assert list(documents_dir.iterdir()) == []
 
 
@@ -283,16 +283,16 @@ def test_compression_timeout_scales_with_pages(monkeypatch):
     monkeypatch.setattr(config, "COMPRESSION_SECONDS_PER_PAGE", 2)
     monkeypatch.setattr(config, "COMPRESSION_MAX_TIMEOUT_SECONDS", 3600)
 
-    assert main.compression_timeout(20) == 640
-    assert main.compression_timeout(1000) == 2600
-    assert main.compression_timeout(100_000) == 3600
+    assert compress_router.compression_timeout(20) == 640
+    assert compress_router.compression_timeout(1000) == 2600
+    assert compress_router.compression_timeout(100_000) == 3600
 
 
 def test_compression_timeout_cap_never_cuts_below_the_base(monkeypatch):
     monkeypatch.setattr(config, "COMPRESSION_TIMEOUT_SECONDS", 900)
     monkeypatch.setattr(config, "COMPRESSION_MAX_TIMEOUT_SECONDS", 300)
 
-    assert main.compression_timeout(1000) == 900
+    assert compress_router.compression_timeout(1000) == 900
 
 
 # --- Configuration from environment variables -------------------------------

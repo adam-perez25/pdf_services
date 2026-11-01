@@ -8,11 +8,11 @@ from PIL import Image, ImageDraw, ImageFont
 from pypdf import PdfReader, PdfWriter
 import pytest
 
-import app.main as main
 import app.config as config
 import app.documents as documents
 import app.errors as errors
 import app.external_tools as external_tools
+import app.routers.ocr as ocr_router
 from conftest import make_pdf
 
 needs_tesseract = pytest.mark.skipif(not external_tools.ocr_available(), reason="ocrmypdf or Tesseract is not installed")
@@ -166,8 +166,8 @@ def test_missing_ocrmypdf_is_reported(client, monkeypatch):
 @pytest.mark.parametrize(
     ("exit_code", "status", "detail"),
     [
-        (main.OCR_EXIT_ENCRYPTED, 400, errors.ENCRYPTED_PDF_MESSAGE),
-        (main.OCR_EXIT_INVALID_CONFIG, 503, main.OCR_MISSING_MESSAGE),
+        (ocr_router.OCR_EXIT_ENCRYPTED, 400, errors.ENCRYPTED_PDF_MESSAGE),
+        (ocr_router.OCR_EXIT_INVALID_CONFIG, 503, ocr_router.OCR_MISSING_MESSAGE),
         (15, 400, "No se pudo aplicar el OCR al PDF."),
     ],
 )
@@ -199,15 +199,15 @@ def test_timeout_is_reported(client, ocr_ready, monkeypatch, documents_dir):
     response = ocr(client, make_pdf(2))
 
     assert response.status_code == 504
-    assert seen["timeout"] == main.ocr_timeout(2)
+    assert seen["timeout"] == ocr_router.ocr_timeout(2)
     assert list(documents_dir.iterdir()) == []
     # ocrmypdf's private scratch folder is removed even though it was killed.
     assert not os.path.exists(seen["tmpdir"])
 
 
 def test_timeout_grows_with_pages_and_is_capped():
-    assert main.ocr_timeout(1) < main.ocr_timeout(10)
-    assert main.ocr_timeout(10_000) == config.OCR_TIMEOUT_MAX_SECONDS
+    assert ocr_router.ocr_timeout(1) < ocr_router.ocr_timeout(10)
+    assert ocr_router.ocr_timeout(10_000) == config.OCR_TIMEOUT_MAX_SECONDS
 
 
 def test_long_ocr_survives_a_sweep(client, ocr_ready, monkeypatch, documents_dir):
@@ -236,7 +236,7 @@ def test_long_ocr_survives_a_sweep(client, ocr_ready, monkeypatch, documents_dir
 
 def test_ocr_limits_allow_big_scans():
     assert config.OCR_MAX_PAGES >= 1000
-    assert main.ocr_timeout(500) > 60 * 60
+    assert ocr_router.ocr_timeout(500) > 60 * 60
 
 
 def make_mixed_pdf() -> bytes:
@@ -270,9 +270,9 @@ def capture_command(monkeypatch) -> dict:
 
 
 def test_page_list_compresses_ranges():
-    assert main.page_list([1, 2, 3, 5, 7, 8]) == "1-3,5,7-8"
-    assert main.page_list([4]) == "4"
-    assert main.page_list([]) == ""
+    assert ocr_router.page_list([1, 2, 3, 5, 7, 8]) == "1-3,5,7-8"
+    assert ocr_router.page_list([4]) == "4"
+    assert ocr_router.page_list([]) == ""
 
 
 def test_only_pages_with_images_are_redone(client, ocr_ready, monkeypatch, documents_dir):

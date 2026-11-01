@@ -7,9 +7,9 @@ from fastapi.testclient import TestClient
 from PIL import Image
 import pytest
 
-import app.main as main
 import app.config as config
 import app.documents as documents
+import app.main as main
 import app.routers.pages as pages_router
 from conftest import page_layout
 

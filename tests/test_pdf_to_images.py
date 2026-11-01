@@ -5,7 +5,6 @@ import zipfile
 from PIL import Image
 import pytest
 
-import app.main as main
 import app.config as config
 import app.errors as errors
 import app.pdf_helpers as pdf_helpers

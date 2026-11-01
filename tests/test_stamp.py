@@ -6,7 +6,6 @@ import pypdfium2
 from pypdf import PdfReader, PdfWriter
 import pytest
 
-import app.main as main
 import app.routers.stamp as stamp_router
 from conftest import make_pdf
 
