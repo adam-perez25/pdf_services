@@ -36,7 +36,7 @@ The service will become a microservice in a home lab, reachable from the local n
 
 | # | Item | Branch | Effort | Summary |
 |---|---|---|---|---|
-| 1 | CI and dependency updates | `chore/ci` | S | GitHub Actions running `python -m pytest` on push (Ubuntu with LibreOffice, Ghostscript, Tesseract via apt); Dependabot for pip, Docker and Actions (every dependency is pinned and several parse untrusted files). Done first so the split below is checked on every push. |
+| 1 | ~~CI and dependency updates~~ (done) | `chore/ci` | S | GitHub Actions running `python -m pytest` on push (Ubuntu with LibreOffice, Ghostscript, Tesseract via apt); Dependabot for pip, Docker and Actions (every dependency is pinned and several parse untrusted files). Done first so the split below is checked on every push. |
 | 2 | Split `app/main.py` into modules | `refactor/split-main` | M | 141 functions in one file. Turn `app/` into a package: config/limits, uploads and names, heavy-job limiter, external tools, and one router per tool. Tests monkeypatch module constants, so they must follow the new module paths. No behaviour change. |
 | 3 | Cancel long jobs | `feature/cancel-jobs` | M | `postForm` (`static/common.js`) keeps its request private, so the UI cannot cancel, and the server never notices a client that left: a closed tab keeps a 2-hour OCR running and its heavy-job reservation. Add a cancel button, and stop the LibreOffice / Ghostscript / OCR process (via `run_tool`) when the client disconnects. |
 | 4 | PDF/A and repair PDF | `feature/pdfa-repair` | M | Ghostscript is already in the image. PDF/A for official paperwork; repair re-saves damaged PDFs. Same pattern as compress (`strip_before_pdf_header`, `heavy_job`), plus a workflow step. |
