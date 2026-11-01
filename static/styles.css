@@ -227,12 +227,13 @@ body.is-reordering, body.is-reordering * { cursor: grabbing !important; }
 .primary-button:hover { background: var(--button-hover-bg); }
 .status { min-height: 20px; margin: 13px 0 0; color: var(--success); font-size: 13px; }
 .status.is-error { color: var(--error); }
-.upload-progress { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; margin-top: 14px; }
+.upload-progress { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; margin-top: 14px; }
 .upload-progress[hidden] { display: none; }
 .upload-progress-track { position: relative; height: 6px; overflow: hidden; background: var(--line); }
 .upload-progress-bar { position: absolute; top: 0; bottom: 0; left: 0; width: 0; background: var(--accent); transition: width .2s ease; }
 .upload-progress.is-processing .upload-progress-bar { width: 30%; transition: none; animation: upload-processing 1.2s ease-in-out infinite; }
 .upload-progress-label { color: var(--muted); font: 500 11px "DM Mono", monospace; white-space: nowrap; }
+.upload-progress-cancel:disabled { opacity: .45; cursor: default; }
 .workflow-empty-steps { margin-top: 18px; }
 .workflow-empty-steps[hidden] { display: none; }
 .workflow-steps { display: grid; gap: 10px; margin: 18px 0 0; padding: 0; list-style: none; }

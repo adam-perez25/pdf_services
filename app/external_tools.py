@@ -1,5 +1,5 @@
 """External programs: finding LibreOffice, Ghostscript and Tesseract, and
-running them with a timeout that kills the whole process tree.
+running them with a timeout (or a cancel) that kills the whole process tree.
 
 Endpoints call these through the module (external_tools.run_tool(...)),
 so tests replace them in one place.
@@ -9,6 +9,9 @@ import os
 import shutil
 import signal
 import subprocess
+import time
+
+from app import cancellation
 
 
 def find_soffice() -> str | None:
@@ -46,8 +49,23 @@ def run_tool(command: list[str], timeout: float, env: dict[str, str] | None = No
         start_new_session=os.name == "posix",
         env=env,
     )
+    # Inside a cancellable job the wait is cut into short slices, so a client
+    # that left (or pressed Cancelar) stops the tool within about a second.
+    check = cancellation.current_check()
+    deadline = time.monotonic() + timeout
     try:
-        stdout, stderr = process.communicate(timeout=timeout)
+        while True:
+            if check is not None and check():
+                raise cancellation.JobCancelled()
+            remaining = max(deadline - time.monotonic(), 0)
+            try:
+                stdout, stderr = process.communicate(
+                    timeout=remaining if check is None else min(remaining, cancellation.POLL_SECONDS)
+                )
+                break
+            except subprocess.TimeoutExpired:
+                if time.monotonic() >= deadline:
+                    raise
     except BaseException:
         kill_process_tree(process)
         process.communicate()

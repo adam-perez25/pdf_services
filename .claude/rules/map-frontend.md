@@ -27,8 +27,8 @@ paths:
 
 - `office.js` is configured by data attributes on `#office-form`: `data-endpoint`, `data-extensions` (comma-separated, no dots), `data-default-name` (Spanish: `documento.pdf`, `hoja-de-calculo.pdf`, `presentacion.pdf`), `data-missing-file`. Choosing a file prefills the name with its stem + `.pdf`. Element ids are the same on all three pages (`office-input`, `office-dropzone`, `office-file-name`, `office-output-name`, `office-status`). A new Office-like tool is just a template with different data attributes.
 - `common.js` helpers:
-  - Page setup: `setupDropzone`, `statusSetter` (toggles `.is-error`), `uploadProgress`.
-  - Requests and downloads: `postForm(url, formData, progress)`, `errorMessage(response, fallback)`, `downloadName(response)` (prefers `filename*=UTF-8''...` over the ASCII `filename="..."` fallback, survives a malformed encoding), `downloadBlob`.
+  - Page setup: `setupDropzone`, `statusSetter` (toggles `.is-error`), `uploadProgress` (also holds a "Cancelar" button wired by `postForm` through `progress.setCancel`).
+  - Requests and downloads: `postForm(url, formData, progress)` (sends a random `X-Job-Id`; Cancelar calls `/api/jobs/{id}/cancel` and aborts the XHR, rejecting with "Trabajo cancelado."), `errorMessage(response, fallback)`, `downloadName(response)` (prefers `filename*=UTF-8''...` over the ASCII `filename="..."` fallback, survives a malformed encoding), `downloadBlob`.
   - Checks and formatting: `withPdfExtension`, `isPdf`, `isImage`, `escapeHtml`.
 - Results download as a blob through a temporary `<a download>`. split.js and pdf-to-images.js check `blob.type === "application/zip"` because a single result comes back as a plain PDF or image.
 - Document store (pages.js and sign.js): upload once to `/api/documents`, thumbnails from `/api/documents/{id}/pages/{n}?width=`, save via `/api/documents/{id}/edit` (sign.js: `/api/documents/{id}/sign`), `DELETE` with `keepalive` on unload, re-upload on 410.

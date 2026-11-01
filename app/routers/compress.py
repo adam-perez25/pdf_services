@@ -2,10 +2,10 @@
 import shutil
 import subprocess
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from starlette.background import BackgroundTask
 
-from app import config, external_tools, heavy_jobs
+from app import cancellation, config, external_tools, heavy_jobs
 from app.documents import protect_from_sweeper
 from app.errors import processing_error
 from app.heavy_jobs import job_estimate_mb
@@ -32,6 +32,7 @@ def compression_timeout(page_count: int) -> float:
 
 @router.post("/api/compress")
 def compress_pdf(
+    request: Request,
     file: UploadFile = File(...),
     level: str = Form("recommended"),
     output_name: str = Form("compressed.pdf"),
@@ -60,7 +61,8 @@ def compress_pdf(
 
     try:
         # A big PDF can take longer than DOCUMENT_TTL_SECONDS to compress.
-        with heavy_jobs.heavy_job(job_estimate_mb("compress", upload_size(file))), \
+        with cancellation.cancellable_job(request), \
+                heavy_jobs.heavy_job(job_estimate_mb("compress", upload_size(file))), \
                 protect_from_sweeper(input_path, output_path):
             with input_path.open("wb") as destination:
                 shutil.copyfileobj(file.file, destination)

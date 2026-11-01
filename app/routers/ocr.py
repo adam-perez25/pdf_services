@@ -9,12 +9,12 @@ import sys
 import tempfile
 import uuid
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pypdf import PdfReader
 import pypdfium2
 from starlette.background import BackgroundTask
 
-from app import config, external_tools, heavy_jobs
+from app import cancellation, config, external_tools, heavy_jobs
 from app.documents import protect_from_sweeper
 from app.errors import encrypted_pdf, logger, processing_error
 from app.heavy_jobs import job_estimate_mb
@@ -121,6 +121,7 @@ def ocr_command(
 
 @router.post("/api/ocr")
 def ocr_pdf(
+    request: Request,
     file: UploadFile = File(...),
     language: str = Form("spa"),
     output_name: str = Form(""),
@@ -149,7 +150,8 @@ def ocr_pdf(
         output_path.unlink(missing_ok=True)
 
     # OCR can run for hours on a big scan: keep the sweep away from its files.
-    with heavy_jobs.heavy_job(job_estimate_mb("ocr", upload_size(file)), [file]), \
+    with cancellation.cancellable_job(request), \
+            heavy_jobs.heavy_job(job_estimate_mb("ocr", upload_size(file)), [file]), \
             protect_from_sweeper(input_path, output_path):
         try:
             with input_path.open("wb") as destination:

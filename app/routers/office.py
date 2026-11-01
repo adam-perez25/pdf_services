@@ -6,10 +6,10 @@ import shutil
 import subprocess
 import tempfile
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
-from app import config, external_tools, heavy_jobs
+from app import cancellation, config, external_tools, heavy_jobs
 from app.errors import processing_error
 from app.heavy_jobs import job_estimate_mb
 from app.uploads import (
@@ -27,26 +27,29 @@ router = APIRouter()
 
 @router.post("/api/word-to-pdf")
 def word_to_pdf(
+    request: Request,
     file: UploadFile = File(...),
     output_name: str = Form(""),
 ):
-    return convert_office_to_pdf(file, output_name, {".doc", ".docx"}, "DOC o DOCX", "Word")
+    return convert_office_to_pdf(request, file, output_name, {".doc", ".docx"}, "DOC o DOCX", "Word")
 
 
 @router.post("/api/excel-to-pdf")
 def excel_to_pdf(
+    request: Request,
     file: UploadFile = File(...),
     output_name: str = Form(""),
 ):
-    return convert_office_to_pdf(file, output_name, {".xls", ".xlsx"}, "XLS o XLSX", "Excel")
+    return convert_office_to_pdf(request, file, output_name, {".xls", ".xlsx"}, "XLS o XLSX", "Excel")
 
 
 @router.post("/api/powerpoint-to-pdf")
 def powerpoint_to_pdf(
+    request: Request,
     file: UploadFile = File(...),
     output_name: str = Form(""),
 ):
-    return convert_office_to_pdf(file, output_name, {".ppt", ".pptx"}, "PPT o PPTX", "PowerPoint")
+    return convert_office_to_pdf(request, file, output_name, {".ppt", ".pptx"}, "PPT o PPTX", "PowerPoint")
 
 
 # The English defaults the pages used to send; they now mean "name it after
@@ -133,6 +136,7 @@ def write_libreoffice_profile(profile_path: Path) -> None:
 
 
 def convert_office_to_pdf(
+    request: Request,
     file: UploadFile,
     output_name: str,
     extensions: set[str],
@@ -157,7 +161,8 @@ def convert_office_to_pdf(
         )
 
     try:
-        with heavy_jobs.heavy_job(job_estimate_mb("office", upload_size(file))), \
+        with cancellation.cancellable_job(request), \
+                heavy_jobs.heavy_job(job_estimate_mb("office", upload_size(file))), \
                 tempfile.TemporaryDirectory() as temporary_directory:
             temporary_path = Path(temporary_directory)
             input_path = temporary_path / f"source{file_extension}"

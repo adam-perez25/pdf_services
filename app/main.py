@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from app import config
 from app.documents import start_document_sweeper
 from app.middleware import (
+    ClientDisconnectWatcher,
     CrossSiteRequestGuard,
     UploadSizeLimit,
     add_security_headers,
@@ -20,6 +21,7 @@ from app.routers import (
     health,
     html_pages,
     images,
+    jobs,
     merge,
     metadata,
     ocr,
@@ -74,6 +76,8 @@ mimetypes.add_type("font/woff2", ".woff2")
 app.mount("/static", StaticFiles(directory=config.BASE_DIR / "static"), name="static")
 app.middleware("http")(revalidate_static_files)
 app.middleware("http")(add_security_headers)
+# Outermost: it owns the server's receive() once a body is in (see its docstring).
+app.add_middleware(ClientDisconnectWatcher)
 
 # One router per tool (app/routers/).
 app.include_router(html_pages.router)
@@ -91,3 +95,4 @@ app.include_router(metadata.router)
 app.include_router(extract_text.router)
 app.include_router(sign.router)
 app.include_router(ocr.router)
+app.include_router(jobs.router)
