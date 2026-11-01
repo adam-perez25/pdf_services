@@ -215,7 +215,7 @@ def test_both_tools_queue_as_heavy_jobs():
 def test_pages_are_served_and_linked(client):
     page = client.get("/pdfa")
     assert page.status_code == 200
-    assert "SERVICIO 17 / PDF/A Y REPARAR" in page.text
+    assert "<title>PDF/A y reparar PDF | PDF Toolkit</title>" in page.text
     assert 'name="color-scheme"' in page.text
     assert 'href="/pdfa"' in client.get("/").text
     assert client.get("/static/pdfa.js").status_code == 200

@@ -7,17 +7,18 @@
     <title>Extraer texto | PDF Toolkit</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
-<body>
-    <main class="shell service-page">
+<body class="tool-page">
+    <a class="skip-link" href="#main">Saltar al contenido</a>
+    <div class="app-layout">
+    <nav id="side-nav" class="side-nav" aria-label="Herramientas">
+        <a class="back-button" href="/">&#8592; Menú</a>
+    </nav>
+    <main class="shell service-page" id="main">
         <section class="intro">
-            <p class="eyebrow">SERVICIO 14 / EXTRAER TEXTO</p>
+            <p class="eyebrow">Extraer texto e imágenes</p>
             <h1>Saca el texto<br><em>de tus PDFs.</em></h1>
             <p class="lede">Descarga el texto de un PDF como archivo TXT (UTF-8), de todas las páginas o solo de las que elijas.</p>
         </section>
-
-        <nav class="service-back" aria-label="Navegación del servicio">
-            <a class="back-button" href="/">&#8592; Menú</a>
-        </nav>
 
         <section class="workspace" aria-labelledby="extract-text-title">
             <div class="view-heading">
@@ -63,6 +64,8 @@
             </label>
         </section>
     </main>
+    </div>
+    <script src="/static/tools.js"></script>
     <script src="/static/common.js"></script>
     <script src="/static/extract-text.js"></script>
 </body>

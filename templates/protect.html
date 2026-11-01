@@ -7,17 +7,18 @@
     <title>Proteger PDF | PDF Toolkit</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
-<body>
-    <main class="shell service-page">
+<body class="tool-page">
+    <a class="skip-link" href="#main">Saltar al contenido</a>
+    <div class="app-layout">
+    <nav id="side-nav" class="side-nav" aria-label="Herramientas">
+        <a class="back-button" href="/">&#8592; Menú</a>
+    </nav>
+    <main class="shell service-page" id="main">
         <section class="intro">
-            <p class="eyebrow">SERVICIO 10 / PROTEGER</p>
+            <p class="eyebrow">Proteger y firmar</p>
             <h1>Protege tus PDFs<br><em>con contraseña.</em></h1>
             <p class="lede">Cifra un PDF con AES-256 para que solo se abra con contraseña, o quita la contraseña de un PDF que ya conoces.</p>
         </section>
-
-        <nav class="service-back" aria-label="Navegación del servicio">
-            <a class="back-button" href="/">&#8592; Menú</a>
-        </nav>
 
         <section class="workspace" aria-labelledby="protect-title">
             <div class="view-heading">
@@ -62,6 +63,8 @@
             <p id="protect-status" class="status" role="status"></p>
         </section>
     </main>
+    </div>
+    <script src="/static/tools.js"></script>
     <script src="/static/common.js"></script>
     <script src="/static/protect.js"></script>
 </body>

@@ -7,22 +7,23 @@
     <title>Organizar páginas | PDF Toolkit</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
-<body>
-    <main class="shell service-page">
+<body class="tool-page">
+    <a class="skip-link" href="#main">Saltar al contenido</a>
+    <div class="app-layout">
+    <nav id="side-nav" class="side-nav" aria-label="Herramientas">
+        <a class="back-button" href="/">&#8592; Menú</a>
+    </nav>
+    <main class="shell service-page" id="main">
         <section class="intro">
-            <p class="eyebrow">SERVICIO 05 / PÁGINAS</p>
+            <p class="eyebrow">Unir y organizar</p>
             <h1>Organiza tus páginas<br><em>a tu manera.</em></h1>
             <p class="lede">Gira, elimina y reordena las páginas de un PDF viendo cada una antes de descargar.</p>
         </section>
 
-        <nav class="service-back" aria-label="Navegación del servicio">
-            <a class="back-button" href="/">&#8592; Menú</a>
-        </nav>
-
         <section class="workspace" aria-labelledby="pages-title">
             <div class="section-heading">
                 <div>
-                    <p class="eyebrow">01 / DOCUMENTO</p>
+                    <p class="eyebrow">Documento</p>
                     <h2 id="pages-title">Tus páginas</h2>
                 </div>
                 <span id="page-count" class="counter">0 páginas</span>
@@ -45,7 +46,7 @@
 
             <div class="section-heading output-heading">
                 <div>
-                    <p class="eyebrow">02 / EXPORTAR</p>
+                    <p class="eyebrow">Exportar</p>
                     <h2>Nombre del resultado</h2>
                 </div>
             </div>
@@ -63,6 +64,7 @@
             <p id="pages-status" class="status" role="status"></p>
         </section>
     </main>
+    </div>
 
     <dialog id="page-preview" class="page-preview" aria-labelledby="page-preview-title">
         <div class="preview-header">
@@ -82,6 +84,7 @@
             <button class="tool-button" type="button" data-preview="next" aria-label="Página siguiente">Siguiente &#8594;</button>
         </div>
     </dialog>
+    <script src="/static/tools.js"></script>
     <script src="/static/common.js"></script>
     <script src="/static/pages.js"></script>
 </body>

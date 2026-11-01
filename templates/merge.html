@@ -7,22 +7,23 @@
     <title>Unir PDF | PDF Toolkit</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
-<body>
-    <main class="shell service-page">
+<body class="tool-page">
+    <a class="skip-link" href="#main">Saltar al contenido</a>
+    <div class="app-layout">
+    <nav id="side-nav" class="side-nav" aria-label="Herramientas">
+        <a class="back-button" href="/">&#8592; Menú</a>
+    </nav>
+    <main class="shell service-page" id="main">
         <section class="intro">
-            <p class="eyebrow">SERVICIO 01 / UNIR</p>
+            <p class="eyebrow">Unir y organizar</p>
             <h1>Une tus documentos<br><em>en el orden correcto.</em></h1>
             <p class="lede">Selecciona tus archivos, ordénalos y descarga un único PDF.</p>
         </section>
 
-        <nav class="service-back" aria-label="Navegación del servicio">
-            <a class="back-button" href="/">&#8592; Menú</a>
-        </nav>
-
         <section class="workspace" aria-labelledby="files-title">
             <div class="section-heading">
                 <div>
-                    <p class="eyebrow">01 / DOCUMENTOS</p>
+                    <p class="eyebrow">Documentos</p>
                     <h2 id="files-title">Tu selección</h2>
                 </div>
                 <span id="file-count" class="counter">0 archivos</span>
@@ -39,7 +40,7 @@
 
             <div class="section-heading output-heading">
                 <div>
-                    <p class="eyebrow">02 / EXPORTAR</p>
+                    <p class="eyebrow">Exportar</p>
                     <h2>Nombre del resultado</h2>
                 </div>
             </div>
@@ -57,6 +58,8 @@
             <p id="status" class="status" role="status"></p>
         </section>
     </main>
+    </div>
+    <script src="/static/tools.js"></script>
     <script src="/static/common.js"></script>
     <script src="/static/merge.js"></script>
 </body>

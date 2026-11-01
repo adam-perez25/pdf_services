@@ -35,7 +35,7 @@ Spanish-language web PDF toolkit: `FastAPI(title="Unir PDF")` in `app/main.py` (
   - `external_tools.py`: `find_soffice` / `find_ghostscript` / `find_tesseract`, `ocr_available`, `run_tool`, `kill_process_tree`.
   - `routers/`: `html_pages.py` (`render_page` and every page route), `health.py`, `jobs.py` (cancel endpoint), `merge.py`, `split.py` (split, split-zip, pdf-info), `pages.py` (organizer + edit-pages), `images.py`, `pdf_to_images.py`, `office.py`, `compress.py`, `protect.py`, `stamp.py`, `metadata.py`, `extract_text.py`, `sign.py`, `ocr.py`, `pdfa.py` (PDF/A and repair). Each defines `router = APIRouter()` and keeps its tool-specific constants and helpers.
 - `templates/*.html`: `index.html` plus one plain HTML page per tool (no Jinja; `render_page` reads the file on each request).
-- `static/`: `common.js`, one JS per tool (`office.js` shared by word/excel/powerpoint), `styles.css`, `fonts/`. Detail: `.claude/rules/map-frontend.md`.
+- `static/`: `tools.js` (the tool list behind the home page and the side nav), `common.js`, one JS per tool (`office.js` shared by word/excel/powerpoint), `styles.css`, `fonts/`. Detail: `.claude/rules/map-frontend.md`.
 - `tests/`: `conftest.py` plus one file per tool and per cross-cutting concern. Detail: `.claude/rules/map-tests.md`.
 - `.claude/skills/docker-verify/` is the project command. `README.md` (Spanish) has the API and config tables; `ROADMAP.md` lists done work and ideas.
 - Docker: the Dockerfile copies only `app`, `static`, `templates`, runs as uid 10001 and has a Python `HEALTHCHECK` on `/health`. `docker-compose.yml` sets `mem_limit: 3g`, `init: true`, `cap_drop: [ALL]`, `no-new-privileges`, `pids_limit: 512` and an `environment:` block with every default.
@@ -110,7 +110,7 @@ Spanish-language web PDF toolkit: `FastAPI(title="Unir PDF")` in `app/main.py` (
 ### Gotchas
 - Keep in sync:
   - README API table and config table <-> endpoints in `app/routers/` and constants in `app/config.py` (fixed ones in their module).
-  - A new tool needs a router, a page route, `templates/x.html`, a card in `templates/index.html`, a test file and a README row.
+  - A new tool needs a router, a page route, `templates/x.html` (with the side nav markup), a `TOOLS` entry in `static/tools.js` plus a `<noscript>` link in `templates/index.html`, a test file and a README row.
   - A new single-file PDF tool can join the workflow with one `STEP_DEFINITIONS` entry in `static/workflow.js` (choose its `position`: start, first, normal, late, archive, last); if its endpoint is renamed, update workflow.js too (test_workflow checks every referenced `/api/...` route exists).
   - `ALLOWED_IMAGE_FORMATS` <-> `accept` in `templates/images.html`; the Office extensions <-> `accept`/`data-extensions` in word/excel/powerpoint.html.
   - Dockerfile copies only `app`, `static`, `templates`, so a new top-level dir needs a COPY.
