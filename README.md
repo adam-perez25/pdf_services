@@ -21,7 +21,9 @@ documentos de forma permanente.
 
 ## Funcionalidades
 
-En el mismo orden que en la página de inicio:
+En el orden en que se añadieron. La página de inicio las muestra agrupadas por
+tarea (Unir y organizar, Convertir a PDF, Reducir y archivar, Proteger y
+firmar, Extraer texto e imágenes, Flujo de trabajo):
 
 1. **Unir PDF:** combina varios archivos PDF en el orden seleccionado.
 2. **Dividir PDF:** separa un PDF en una página por archivo o en rangos
@@ -409,6 +411,12 @@ Cada herramienta tiene su propia página: `/` (inicio), `/merge`, `/split`,
 `/sign`, `/pdfa` y `/workflow`. El flujo de trabajo no tiene endpoint propio: encadena
 los de las demás herramientas desde el navegador.
 
+La página de inicio tiene un buscador (la tecla `/` lo enfoca; Intro abre la
+primera herramienta encontrada y Esc lo vacía). Cada herramienta muestra a la
+izquierda la lista de todas, agrupadas, para cambiar de una a otra sin volver
+al inicio; en el móvil esa lista se abre con el botón «Herramientas». La
+lista sale de un único archivo, `static/tools.js`.
+
 ## API
 
 Las peticiones con archivos usan `multipart/form-data`. Los endpoints que
@@ -521,7 +529,7 @@ añadirlos, junto con límites de frecuencia.
   `Referrer-Policy: no-referrer`. Los archivos de `/static` se sirven con
   `Cache-Control: no-cache` para que el navegador recoja la versión nueva tras
   reconstruir la imagen.
-- **Sin recursos externos:** las fuentes Manrope y DM Mono se sirven desde
+- **Sin recursos externos:** la fuente Manrope se sirve desde
   `static/fonts/` (SIL Open Font License), así que el navegador no hace
   peticiones a terceros.
 
@@ -561,8 +569,8 @@ app/
   external_tools.py   # LibreOffice, Ghostscript, Tesseract y su ejecución
   errors.py           # Mensajes de error comunes
   routers/            # Un router por herramienta, más páginas HTML y /health
-static/               # JavaScript (uno por herramienta, más common.js) y estilos
-  fonts/              # Fuentes Manrope y DM Mono incluidas (licencia OFL)
+static/               # JavaScript (uno por herramienta, más common.js y tools.js) y estilos
+  fonts/              # Fuente Manrope incluida (licencia OFL)
 templates/            # Página de inicio y una página HTML por herramienta
 tests/                # Pruebas con pytest (conftest.py y una por herramienta)
 Dockerfile            # Imagen (python:3.12-slim + LibreOffice, Ghostscript, Tesseract)

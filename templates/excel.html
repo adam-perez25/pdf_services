@@ -7,17 +7,18 @@
     <title>Excel a PDF | PDF Toolkit</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
-<body>
-    <main class="shell service-page">
+<body class="tool-page">
+    <a class="skip-link" href="#main">Saltar al contenido</a>
+    <div class="app-layout">
+    <nav id="side-nav" class="side-nav" aria-label="Herramientas">
+        <a class="back-button" href="/">&#8592; Menú</a>
+    </nav>
+    <main class="shell service-page" id="main">
         <section class="intro">
-            <p class="eyebrow">SERVICIO 07 / CONVERTIR</p>
+            <p class="eyebrow">Convertir a PDF</p>
             <h1>Convierte Excel<br><em>en un PDF.</em></h1>
             <p class="lede">Sube una hoja de cálculo XLS o XLSX y descarga su versión en PDF.</p>
         </section>
-
-        <nav class="service-back" aria-label="Navegación del servicio">
-            <a class="back-button" href="/">&#8592; Menú</a>
-        </nav>
 
         <section class="workspace" aria-labelledby="office-title">
             <div class="view-heading">
@@ -44,6 +45,8 @@
             <p id="office-status" class="status" role="status"></p>
         </section>
     </main>
+    </div>
+    <script src="/static/tools.js"></script>
     <script src="/static/common.js"></script>
     <script src="/static/office.js"></script>
 </body>

@@ -5,8 +5,12 @@ paths:
 ---
 # Frontend map
 
-- Static HTML, no framework, no build step, no Jinja. Every page links `/static/styles.css` and has a back link (`a.back-button` to `/`, text "Menú"). `index.html` has one `a.service-card` per tool (17, numbered 01-17; the workflow card keeps 16 and sits last).
-- Scripts load at the bottom of each template: `/static/common.js` first, then the page's own JS. They are plain globals (no modules).
+- Static HTML, no framework, no build step, no Jinja. Every page links `/static/styles.css` and starts with `a.skip-link` to `#main`.
+- `static/tools.js` is the single list of tools: `TOOL_GROUPS` (organize, convert, reduce, secure, extract, workflow) and `TOOLS` (`id`, `group`, `path`, `title`, `summary`). It builds:
+  - the side navigation on every tool page, into `nav#side-nav` (body `.tool-page`, inside `div.app-layout`; the static `a.back-button` to `/` is the no-JS fallback): brand, `.nav-toggle` "Herramientas" (phones; `aria-expanded`, Esc closes), group headings and links with `aria-current="page"`. A sidebar from 960 px.
+  - the home page (`index.html`): grouped `.tool-card`s into `#tool-groups`, the `#tool-search` box (hidden in the HTML, shown by the script; `/` focuses it, Enter opens the first match, Esc clears; accent-insensitive) and `#tool-search-empty`. A `<noscript>` list links every tool.
+  - A new tool needs a `TOOLS` entry and a `<noscript>` link (test_navigation checks both against the page routes). Tool-page eyebrows show the group title.
+- Scripts load at the bottom of each template: `/static/tools.js`, then `/static/common.js`, then the page's own JS. They are plain globals (no modules).
 
   | Template | Script |
   |---|---|
@@ -40,6 +44,7 @@ paths:
   - Helpers: `field`, `selectControl`, `numberControl`, `textControl`, `checkControl`.
 - CSP (set by the server): no inline `<script>` or handlers, no external hosts, images only from self or `blob:`. Fonts are local (`static/fonts`).
 - sign.js sends placements as fractions of the page preview (pdfium renders it rotated and cropped, so it matches). The pad and the "Firma actual" preview use `color-scheme: light; background: Canvas` so dark ink stays visible in dark mode; `touch-action: none` on the pad and boxes stops page scroll while drawing or dragging.
+- Design: `styles.css` uses Manrope only (no monospace labels, no uppercase), a cool paper background, one "stamp blue" `--accent` and a folder-tab color per group (`--tab-<group>`, picked through `[data-group]` as `--tab`); focus rings, 44 px nav targets and a `prefers-reduced-motion` block. `[hidden]` is forced to `display: none`.
 - Dark mode: all colors are CSS custom properties on `:root`, redefined in a `prefers-color-scheme: dark` block; every template has `<meta name="color-scheme" content="light dark">`. New CSS must use the variables (test_dark_mode rejects hardcoded colors).
 - `/static` is served with `Cache-Control: no-cache`, so no cache-busting query strings are needed.
 - File input `accept` attributes must match the backend (`ALLOWED_IMAGE_FORMATS` in `templates/images.html`, Office extensions in word/excel/powerpoint.html).

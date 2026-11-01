@@ -7,17 +7,18 @@
     <title>Dividir PDF | PDF Toolkit</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
-<body>
-    <main class="shell service-page">
+<body class="tool-page">
+    <a class="skip-link" href="#main">Saltar al contenido</a>
+    <div class="app-layout">
+    <nav id="side-nav" class="side-nav" aria-label="Herramientas">
+        <a class="back-button" href="/">&#8592; Menú</a>
+    </nav>
+    <main class="shell service-page" id="main">
         <section class="intro">
-            <p class="eyebrow">SERVICIO 02 / DIVIDIR</p>
+            <p class="eyebrow">Unir y organizar</p>
             <h1>Divide tus documentos<br><em>a tu medida.</em></h1>
             <p class="lede">Crea un PDF por página o usa rangos personalizados.</p>
         </section>
-
-        <nav class="service-back" aria-label="Navegación del servicio">
-            <a class="back-button" href="/">&#8592; Menú</a>
-        </nav>
 
         <section class="workspace" aria-labelledby="split-title">
             <div class="view-heading">
@@ -59,6 +60,8 @@
             <p id="split-status" class="status" role="status"></p>
         </section>
     </main>
+    </div>
+    <script src="/static/tools.js"></script>
     <script src="/static/common.js"></script>
     <script src="/static/split.js"></script>
 </body>

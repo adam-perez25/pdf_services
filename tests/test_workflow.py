@@ -39,7 +39,7 @@ def test_page_route(client):
     assert response.status_code == 200
     assert "/static/common.js" in response.text
     assert "/static/workflow.js" in response.text
-    assert "SERVICIO 16 / FLUJO DE TRABAJO" in response.text
+    assert "<title>Flujo de trabajo | PDF Toolkit</title>" in response.text
 
 
 def test_template_declares_color_scheme():

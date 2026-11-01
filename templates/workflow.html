@@ -7,22 +7,23 @@
     <title>Flujo de trabajo | PDF Toolkit</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
-<body>
-    <main class="shell service-page">
+<body class="tool-page">
+    <a class="skip-link" href="#main">Saltar al contenido</a>
+    <div class="app-layout">
+    <nav id="side-nav" class="side-nav" aria-label="Herramientas">
+        <a class="back-button" href="/">&#8592; Menú</a>
+    </nav>
+    <main class="shell service-page" id="main">
         <section class="intro">
-            <p class="eyebrow">SERVICIO 16 / FLUJO DE TRABAJO</p>
+            <p class="eyebrow">Flujo de trabajo</p>
             <h1>Varias herramientas<br><em>de una sola vez.</em></h1>
             <p class="lede">Encadena pasos (unir, OCR, numerar, marca de agua, comprimir, borrar metadatos, proteger) y descarga solo el resultado final.</p>
         </section>
 
-        <nav class="service-back" aria-label="Navegación del servicio">
-            <a class="back-button" href="/">&#8592; Menú</a>
-        </nav>
-
         <section class="workspace" aria-labelledby="workflow-files-title">
             <div class="section-heading">
                 <div>
-                    <p class="eyebrow">01 / DOCUMENTOS</p>
+                    <p class="eyebrow">Documentos</p>
                     <h2 id="workflow-files-title">Tu selección</h2>
                 </div>
                 <span id="workflow-file-count" class="counter">0 archivos</span>
@@ -40,7 +41,7 @@
             <form id="workflow-form" novalidate>
                 <div class="section-heading output-heading">
                     <div>
-                        <p class="eyebrow">02 / PASOS</p>
+                        <p class="eyebrow">Pasos</p>
                         <h2>Qué hacer y en qué orden</h2>
                     </div>
                     <span id="workflow-step-count" class="counter">0 pasos</span>
@@ -60,7 +61,7 @@
 
                 <div class="section-heading output-heading">
                     <div>
-                        <p class="eyebrow">03 / EXPORTAR</p>
+                        <p class="eyebrow">Exportar</p>
                         <h2>Nombre del resultado</h2>
                     </div>
                 </div>
@@ -80,6 +81,8 @@
             </div>
         </section>
     </main>
+    </div>
+    <script src="/static/tools.js"></script>
     <script src="/static/common.js"></script>
     <script src="/static/workflow.js"></script>
 </body>

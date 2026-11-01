@@ -7,24 +7,25 @@
     <title>Firmar PDF | PDF Toolkit</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
-<body>
-    <main class="shell service-page">
+<body class="tool-page">
+    <a class="skip-link" href="#main">Saltar al contenido</a>
+    <div class="app-layout">
+    <nav id="side-nav" class="side-nav" aria-label="Herramientas">
+        <a class="back-button" href="/">&#8592; Menú</a>
+    </nav>
+    <main class="shell service-page" id="main">
         <section class="intro">
-            <p class="eyebrow">SERVICIO 15 / FIRMAR</p>
+            <p class="eyebrow">Proteger y firmar</p>
             <h1>Firmar PDF<br><em>con tu firma.</em></h1>
             <p class="lede">Dibuja tu firma o sube una imagen y colócala en las páginas que quieras.</p>
         </section>
-
-        <nav class="service-back" aria-label="Navegación del servicio">
-            <a class="back-button" href="/">&#8592; Menú</a>
-        </nav>
 
         <section class="workspace" aria-labelledby="sign-title">
             <p class="sign-notice">Es una firma visual: se añade como una imagen sobre la página. No es una firma digital ni electrónica certificada, así que no acredita la identidad de quien firma ni protege el documento frente a cambios.</p>
 
             <div class="section-heading">
                 <div>
-                    <p class="eyebrow">01 / DOCUMENTO</p>
+                    <p class="eyebrow">Documento</p>
                     <h2 id="sign-title">Documento PDF</h2>
                 </div>
                 <span id="sign-page-count" class="counter">0 páginas</span>
@@ -38,7 +39,7 @@
 
             <div class="section-heading output-heading">
                 <div>
-                    <p class="eyebrow">02 / FIRMA</p>
+                    <p class="eyebrow">Firma</p>
                     <h2>Crea tu firma</h2>
                 </div>
             </div>
@@ -82,7 +83,7 @@
 
             <div class="section-heading output-heading">
                 <div>
-                    <p class="eyebrow">03 / COLOCAR</p>
+                    <p class="eyebrow">Colocar</p>
                     <h2>Coloca la firma</h2>
                 </div>
                 <span id="sign-placement-count" class="counter">0 firmas</span>
@@ -111,7 +112,7 @@
 
             <div class="section-heading output-heading">
                 <div>
-                    <p class="eyebrow">04 / EXPORTAR</p>
+                    <p class="eyebrow">Exportar</p>
                     <h2>Nombre del resultado</h2>
                 </div>
             </div>
@@ -129,6 +130,8 @@
             <p id="sign-status" class="status" role="status"></p>
         </section>
     </main>
+    </div>
+    <script src="/static/tools.js"></script>
     <script src="/static/common.js"></script>
     <script src="/static/sign.js"></script>
 </body>

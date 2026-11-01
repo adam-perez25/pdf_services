@@ -167,6 +167,6 @@ def test_page_route_and_home_card(client):
     home = client.get("/")
 
     assert page.status_code == 200
-    assert "SERVICIO 14 / EXTRAER TEXTO" in page.text
+    assert "<title>Extraer texto | PDF Toolkit</title>" in page.text
     assert "/static/extract-text.js" in page.text
     assert 'href="/extract-text"' in home.text

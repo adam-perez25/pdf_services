@@ -7,156 +7,48 @@
     <title>PDF Toolkit</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
-<body>
-    <main class="shell">
+<body class="home-page">
+    <a class="skip-link" href="#main">Saltar al contenido</a>
+    <main class="shell home-shell" id="main">
         <section class="intro">
-            <p class="eyebrow">PDF TOOLKIT</p>
+            <p class="eyebrow">PDF Toolkit</p>
             <h1>Herramientas para<br><em>tus PDFs.</em></h1>
-            <p class="lede">Elige una función para empezar a trabajar con tus documentos.</p>
+            <p class="lede">Elige una herramienta. Los archivos se procesan en este servidor y no se guardan.</p>
         </section>
 
-        <section class="service-menu" aria-labelledby="services-title">
-            <p class="eyebrow">SERVICIOS</p>
-            <h2 id="services-title">¿Qué quieres hacer?</h2>
-            <div class="service-grid">
-                <a class="service-card" href="/merge">
-                    <span class="service-index">01</span>
-                    <span class="service-copy">
-                        <strong>Unir PDF</strong>
-                        <small>Combina varios documentos en uno.</small>
-                    </span>
-                    <span class="service-arrow" aria-hidden="true">&#8594;</span>
-                </a>
-                <a class="service-card" href="/split">
-                    <span class="service-index">02</span>
-                    <span class="service-copy">
-                        <strong>Dividir PDF</strong>
-                        <small>Separa un documento en varios archivos.</small>
-                    </span>
-                    <span class="service-arrow" aria-hidden="true">&#8594;</span>
-                </a>
-                <a class="service-card" href="/images">
-                    <span class="service-index">03</span>
-                    <span class="service-copy">
-                        <strong>Imágenes a PDF</strong>
-                        <small>Convierte varias imágenes en un único PDF.</small>
-                    </span>
-                    <span class="service-arrow" aria-hidden="true">&#8594;</span>
-                </a>
-                <a class="service-card" href="/word">
-                    <span class="service-index">04</span>
-                    <span class="service-copy">
-                        <strong>Word a PDF</strong>
-                        <small>Convierte documentos DOC y DOCX en PDF.</small>
-                    </span>
-                    <span class="service-arrow" aria-hidden="true">&#8594;</span>
-                </a>
-                <a class="service-card" href="/pages">
-                    <span class="service-index">05</span>
-                    <span class="service-copy">
-                        <strong>Organizar páginas</strong>
-                        <small>Gira, elimina y reordena páginas con vista previa.</small>
-                    </span>
-                    <span class="service-arrow" aria-hidden="true">&#8594;</span>
-                </a>
-                <a class="service-card" href="/compress">
-                    <span class="service-index">06</span>
-                    <span class="service-copy">
-                        <strong>Comprimir PDF</strong>
-                        <small>Reduce el tamaño, ideal para documentos escaneados.</small>
-                    </span>
-                    <span class="service-arrow" aria-hidden="true">&#8594;</span>
-                </a>
-                <a class="service-card" href="/excel">
-                    <span class="service-index">07</span>
-                    <span class="service-copy">
-                        <strong>Excel a PDF</strong>
-                        <small>Convierte hojas de cálculo XLS y XLSX en PDF.</small>
-                    </span>
-                    <span class="service-arrow" aria-hidden="true">&#8594;</span>
-                </a>
-                <a class="service-card" href="/powerpoint">
-                    <span class="service-index">08</span>
-                    <span class="service-copy">
-                        <strong>PowerPoint a PDF</strong>
-                        <small>Convierte presentaciones PPT y PPTX en PDF.</small>
-                    </span>
-                    <span class="service-arrow" aria-hidden="true">&#8594;</span>
-                </a>
-                <a class="service-card" href="/pdf-to-images">
-                    <span class="service-index">09</span>
-                    <span class="service-copy">
-                        <strong>PDF a imágenes</strong>
-                        <small>Convierte cada página en una imagen PNG o JPG.</small>
-                    </span>
-                    <span class="service-arrow" aria-hidden="true">&#8594;</span>
-                </a>
-                <a class="service-card" href="/protect">
-                    <span class="service-index">10</span>
-                    <span class="service-copy">
-                        <strong>Proteger PDF</strong>
-                        <small>Añade o quita la contraseña de un PDF (AES-256).</small>
-                    </span>
-                    <span class="service-arrow" aria-hidden="true">&#8594;</span>
-                </a>
-                <a class="service-card" href="/stamp">
-                    <span class="service-index">11</span>
-                    <span class="service-copy">
-                        <strong>Numerar y marca de agua</strong>
-                        <small>Añade números de página o un texto de marca de agua.</small>
-                    </span>
-                    <span class="service-arrow" aria-hidden="true">&#8594;</span>
-                </a>
-                <a class="service-card" href="/metadata">
-                    <span class="service-index">12</span>
-                    <span class="service-copy">
-                        <strong>Editar metadatos</strong>
-                        <small>Cambia título y autor, o borra todos los metadatos.</small>
-                    </span>
-                    <span class="service-arrow" aria-hidden="true">&#8594;</span>
-                </a>
-                <a class="service-card" href="/ocr">
-                    <span class="service-index">13</span>
-                    <span class="service-copy">
-                        <strong>OCR: hacer buscable un PDF escaneado</strong>
-                        <small>Reconoce el texto de los escaneos para poder buscarlo y copiarlo.</small>
-                    </span>
-                    <span class="service-arrow" aria-hidden="true">&#8594;</span>
-                </a>
-                <a class="service-card" href="/extract-text">
-                    <span class="service-index">14</span>
-                    <span class="service-copy">
-                        <strong>Extraer texto</strong>
-                        <small>Descarga el texto de un PDF como archivo TXT.</small>
-                    </span>
-                    <span class="service-arrow" aria-hidden="true">&#8594;</span>
-                </a>
-                <a class="service-card" href="/sign">
-                    <span class="service-index">15</span>
-                    <span class="service-copy">
-                        <strong>Firmar PDF</strong>
-                        <small>Dibuja o sube tu firma y colócala en las páginas (firma visual).</small>
-                    </span>
-                    <span class="service-arrow" aria-hidden="true">&#8594;</span>
-                </a>
-                <a class="service-card" href="/pdfa">
-                    <span class="service-index">17</span>
-                    <span class="service-copy">
-                        <strong>PDF/A y reparar</strong>
-                        <small>Convierte a PDF/A para archivo o vuelve a guardar un PDF dañado.</small>
-                    </span>
-                    <span class="service-arrow" aria-hidden="true">&#8594;</span>
-                </a>
-                <a class="service-card" href="/workflow">
-                    <span class="service-index">16</span>
-                    <span class="service-copy">
-                        <strong>Flujo de trabajo</strong>
-                        <small>Encadena varias herramientas y descarga solo el resultado.</small>
-                    </span>
-                    <span class="service-arrow" aria-hidden="true">&#8594;</span>
-                </a>
+        <div class="tool-search" role="search" hidden>
+            <label class="tool-search-label" for="tool-search">Buscar herramienta</label>
+            <div class="tool-search-box">
+                <input id="tool-search" type="search" placeholder="Por ejemplo: comprimir, firma, Word" autocomplete="off" aria-describedby="tool-search-hint">
+                <kbd class="tool-search-key" id="tool-search-hint" aria-label="Pulsa la barra para buscar">/</kbd>
             </div>
-        </section>
+        </div>
+        <p id="tool-search-empty" class="tool-search-empty" role="status" hidden>No hay ninguna herramienta con ese nombre.</p>
+
+        <div id="tool-groups" class="tool-groups"></div>
+
+        <noscript>
+            <ul class="tool-fallback">
+                <li><a href="/merge">Unir PDF</a></li>
+                <li><a href="/split">Dividir PDF</a></li>
+                <li><a href="/pages">Organizar páginas</a></li>
+                <li><a href="/stamp">Numerar y marca de agua</a></li>
+                <li><a href="/images">Imágenes a PDF</a></li>
+                <li><a href="/word">Word a PDF</a></li>
+                <li><a href="/excel">Excel a PDF</a></li>
+                <li><a href="/powerpoint">PowerPoint a PDF</a></li>
+                <li><a href="/compress">Comprimir PDF</a></li>
+                <li><a href="/pdfa">PDF/A y reparar</a></li>
+                <li><a href="/protect">Proteger PDF</a></li>
+                <li><a href="/sign">Firmar PDF</a></li>
+                <li><a href="/metadata">Editar metadatos</a></li>
+                <li><a href="/ocr">OCR: hacer buscable un escaneo</a></li>
+                <li><a href="/extract-text">Extraer texto</a></li>
+                <li><a href="/pdf-to-images">PDF a imágenes</a></li>
+                <li><a href="/workflow">Flujo de trabajo</a></li>
+            </ul>
+        </noscript>
     </main>
+    <script src="/static/tools.js"></script>
 </body>
 </html>

@@ -7,17 +7,18 @@
     <title>OCR | PDF Toolkit</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
-<body>
-    <main class="shell service-page">
+<body class="tool-page">
+    <a class="skip-link" href="#main">Saltar al contenido</a>
+    <div class="app-layout">
+    <nav id="side-nav" class="side-nav" aria-label="Herramientas">
+        <a class="back-button" href="/">&#8592; Menú</a>
+    </nav>
+    <main class="shell service-page" id="main">
         <section class="intro">
-            <p class="eyebrow">SERVICIO 13 / OCR</p>
+            <p class="eyebrow">Extraer texto e imágenes</p>
             <h1>Haz buscable<br><em>un PDF escaneado.</em></h1>
             <p class="lede">Reconoce el texto de las páginas escaneadas y lo añade como una capa invisible: podrás buscar, seleccionar y copiar el texto sin que cambie el aspecto del documento.</p>
         </section>
-
-        <nav class="service-back" aria-label="Navegación del servicio">
-            <a class="back-button" href="/">&#8592; Menú</a>
-        </nav>
 
         <section class="workspace" aria-labelledby="ocr-title">
             <div class="view-heading">
@@ -53,6 +54,8 @@
             <p id="ocr-status" class="status" role="status"></p>
         </section>
     </main>
+    </div>
+    <script src="/static/tools.js"></script>
     <script src="/static/common.js"></script>
     <script src="/static/ocr.js"></script>
 </body>

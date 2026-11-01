@@ -7,17 +7,18 @@
     <title>Imágenes a PDF | PDF Toolkit</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
-<body>
-    <main class="shell service-page">
+<body class="tool-page">
+    <a class="skip-link" href="#main">Saltar al contenido</a>
+    <div class="app-layout">
+    <nav id="side-nav" class="side-nav" aria-label="Herramientas">
+        <a class="back-button" href="/">&#8592; Menú</a>
+    </nav>
+    <main class="shell service-page" id="main">
         <section class="intro">
-            <p class="eyebrow">SERVICIO 03 / CONVERTIR</p>
+            <p class="eyebrow">Convertir a PDF</p>
             <h1>Convierte imágenes<br><em>en un PDF.</em></h1>
             <p class="lede">Selecciona, ordena y descarga tus imágenes como un único documento.</p>
         </section>
-
-        <nav class="service-back" aria-label="Navegación del servicio">
-            <a class="back-button" href="/">&#8592; Menú</a>
-        </nav>
 
         <section class="workspace" aria-labelledby="images-title">
             <div class="view-heading">
@@ -47,6 +48,8 @@
             <p id="images-status" class="status" role="status"></p>
         </section>
     </main>
+    </div>
+    <script src="/static/tools.js"></script>
     <script src="/static/common.js"></script>
     <script src="/static/images.js"></script>
 </body>
