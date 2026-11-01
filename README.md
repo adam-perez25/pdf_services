@@ -1,3 +1,5 @@
+[![Tests](https://github.com/adam-perez25/pdf_services/actions/workflows/tests.yml/badge.svg)](https://github.com/adam-perez25/pdf_services/actions/workflows/tests.yml)
+
 # PDF Toolkit
 
 Aplicación web para trabajar con documentos PDF desde el navegador: unir,
