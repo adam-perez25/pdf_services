@@ -5,7 +5,7 @@ paths:
 ---
 # Frontend map
 
-- Static HTML, no framework, no build step, no Jinja. Every page links `/static/styles.css` and has a back link (`a.back-button` to `/`, text "Menú"). `index.html` has one `a.service-card` per tool (16, numbered 01-16).
+- Static HTML, no framework, no build step, no Jinja. Every page links `/static/styles.css` and has a back link (`a.back-button` to `/`, text "Menú"). `index.html` has one `a.service-card` per tool (17, numbered 01-17; the workflow card keeps 16 and sits last).
 - Scripts load at the bottom of each template: `/static/common.js` first, then the page's own JS. They are plain globals (no modules).
 
   | Template | Script |
@@ -23,6 +23,7 @@ paths:
   | workflow | workflow.js (see below) |
   | extract-text | extract-text.js (downloads the .txt, fills the read-only `#extract-text-preview` textarea via `.value` with the first 2000 chars; counts from `X-Page-Count` / `X-Character-Count`) |
   | sign | sign.js (largest, ~660 lines; document store like pages.js, drawing pad canvas + PNG/JPEG upload, draggable/resizable `.sign-box` overlays, arrow keys nudge) |
+  | pdfa | pdfa.js (mode select `#pdfa-mode`: pdfa / repair; `#pdfa-part-field` with the PDF/A version is hidden for repair) |
   | ocr | ocr.js (language select `#ocr-language`: spa / eng / spa+eng; ignores resubmits while a request runs) |
 
 - `office.js` is configured by data attributes on `#office-form`: `data-endpoint`, `data-extensions` (comma-separated, no dots), `data-default-name` (Spanish: `documento.pdf`, `hoja-de-calculo.pdf`, `presentacion.pdf`), `data-missing-file`. Choosing a file prefills the name with its stem + `.pdf`. Element ids are the same on all three pages (`office-input`, `office-dropzone`, `office-file-name`, `office-output-name`, `office-status`). A new Office-like tool is just a template with different data attributes.
@@ -35,7 +36,7 @@ paths:
 - workflow.js chains tools client-side: it posts each step's result Blob as `file` to the existing `/api/*` endpoints with `postForm()`, downloads only the final result and offers the last good intermediate if a step fails (cleared when files or steps change).
   - `MERGE_STEP` runs first when there are several PDFs.
   - `STEP_DEFINITIONS` entries are data-driven: `id`, `title`, `endpoint`, `working`, `failed`, optional `position`, `build(container)` -> `fill(formData)` (returns an error string or `""`), optional `afterResponse`, optional `clear`.
-  - Positions: ocr `first` (before anything that adds text, which OCR would skip), numbers / watermark / compress normal, metadata `late` (after compress/OCR rewrite producer and dates), protect `last`. `POSITION_RANK` sorts them; `canMove` / `moveStep` only swap steps within the same group, and `addStep` puts a new step at the end of its group.
+  - Positions: repair `start` (a damaged file is fixed before anything reads it), ocr `first` (before anything that adds text, which OCR would skip), numbers / watermark / compress normal, metadata `late` (after compress/OCR rewrite producer and dates), pdfa `archive` (any later change breaks PDF/A), protect `last`. `POSITION_RANK` sorts them; `canMove` / `moveStep` only swap steps within the same group, and `addStep` puts a new step at the end of its group.
   - Helpers: `field`, `selectControl`, `numberControl`, `textControl`, `checkControl`.
 - CSP (set by the server): no inline `<script>` or handlers, no external hosts, images only from self or `blob:`. Fonts are local (`static/fonts`).
 - sign.js sends placements as fractions of the page preview (pdfium renders it rotated and cropped, so it matches). The pad and the "Firma actual" preview use `color-scheme: light; background: Canvas` so dark ink stays visible in dark mode; `touch-action: none` on the pad and boxes stops page scroll while drawing or dragging.

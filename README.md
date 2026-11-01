@@ -100,16 +100,22 @@ En el mismo orden que en la página de inicio:
     Es una firma **visual** (una imagen sobre la página), no una firma digital
     certificada: no acredita la identidad de quien firma ni protege el
     documento frente a cambios. Funciona aunque las páginas estén giradas.
-16. **Flujo de trabajo:** encadena varias herramientas de una sola vez (OCR,
-    numerar páginas, marca de agua, comprimir, metadatos y proteger) y
+16. **Flujo de trabajo:** encadena varias herramientas de una sola vez
+    (reparar, OCR, numerar páginas, marca de agua, comprimir, metadatos,
+    PDF/A y proteger) y
     descarga solo el resultado final. Algunos pasos tienen un sitio fijo y
     solo se pueden reordenar los demás:
     - si se eligen varios PDF, el primer paso es siempre unirlos;
+    - «Reparar PDF» va antes que todos los demás (un archivo dañado hay que
+      arreglarlo antes de que otra herramienta lo lea);
     - el OCR va el primero de los pasos (así el texto que añaden la
       numeración o la marca de agua no tapa el escaneo ni se reconoce);
     - los metadatos van después de los pasos normales (comprimir y el OCR
       escriben su propio productor, fechas y XMP, que así también se borran);
-    - «Proteger con contraseña» va siempre al final.
+    - «Convertir a PDF/A» va después de los metadatos: cualquier cambio
+      posterior lo deja de ser;
+    - «Proteger con contraseña» va siempre al final (un PDF/A no puede llevar
+      contraseña).
 
     El navegador llama uno tras otro a los mismos endpoints de la API, así que
     cada paso aplica sus propias validaciones y límites; si un paso falla, se
@@ -380,12 +386,23 @@ variables de entorno):
 | `HEAVY_JOB_MIN_MB` | 100 MB | Los trabajos con una estimación menor no reservan memoria ni esperan. |
 | `HEAVY_JOB_RETRY_AFTER_SECONDS` | 60 s | Valor de `Retry-After` cuando el servidor está ocupado. |
 
+17. **PDF/A y reparar:** convierte un PDF a PDF/A-1, 2 (recomendado) o 3 para
+    trámites oficiales y archivo a largo plazo, o vuelve a guardar un PDF
+    dañado (truncado, con la tabla de referencias rota...) para que se abra.
+    Los dos usan Ghostscript. PDF/A convierte los colores a RGB, incrusta el
+    perfil sRGB como intención de salida y descarta lo que el estándar
+    prohíbe (JavaScript, transparencias en PDF/A-1...). El resultado se
+    identifica como PDF/A en sus metadatos, pero el servidor **no lo valida**
+    con un verificador externo (como veraPDF): si un trámite lo exige,
+    compruébalo con uno. No acepta PDF con contraseña. Reparar responde `400`
+    si del archivo no se puede salvar ninguna página.
+
 ## Interfaz web
 
 Cada herramienta tiene su propia página: `/` (inicio), `/merge`, `/split`,
 `/images`, `/word`, `/pages`, `/compress`, `/excel`, `/powerpoint`,
 `/pdf-to-images`, `/protect`, `/stamp`, `/metadata`, `/ocr`, `/extract-text`,
-`/sign` y `/workflow`. El flujo de trabajo no tiene endpoint propio: encadena
+`/sign`, `/pdfa` y `/workflow`. El flujo de trabajo no tiene endpoint propio: encadena
 los de las demás herramientas desde el navegador.
 
 ## API
@@ -415,6 +432,8 @@ estricta la rompería): la API se describe en esta tabla.
 | `POST` | `/api/metadata/read` | Devuelve en JSON los metadatos de un PDF (`title`, `author`, `subject`, `keywords`, `creator`, `producer`, `creation_date`, `modification_date`; `null` si faltan) y su número de páginas (`pages`). |
 | `POST` | `/api/metadata` | Escribe `title`, `author`, `subject` y `keywords` (máximo 500 caracteres cada uno; un campo vacío o ausente se elimina), sustituye el bloque XMP por uno nuevo con los mismos valores y borra las entradas no estándar (se conservan creador, productor, fechas y `/Trapped`). Con `remove_all=true` elimina todos los metadatos, incluidos el XMP del documento y el de cada página. La descarga se llama `<nombre>-metadatos.pdf`. |
 | `POST` | `/api/ocr` | Hace buscable un PDF escaneado; `language` es `spa` (por defecto), `eng` o `spa+eng`. Solo procesa las páginas con imágenes (`--redo-ocr --pages ...`: conserva el texto visible y rehace una capa OCR anterior) y endereza las giradas (`--rotate-pages`); las páginas de texto digital se copian sin cambios. Con formularios rellenables, o si OCRmyPDF rechaza `--redo-ocr`, usa `--skip-text`. Máximo `OCR_MAX_PAGES` páginas. La descarga se llama `<nombre>-ocr.pdf`. |
+| `POST` | `/api/pdfa` | Convierte un PDF a PDF/A con Ghostscript; `part` es `1`, `2` (por defecto) o `3`. La cabecera `X-PDFA-Part` indica la versión. Descarga `<nombre>-pdfa.pdf`. `503` si falta Ghostscript o su perfil de color sRGB. |
+| `POST` | `/api/repair` | Vuelve a guardar un PDF dañado con Ghostscript. Descarga `<nombre>-reparado.pdf`; `400` si no se puede salvar ninguna página. |
 | `POST` | `/api/extract-text` | Devuelve el texto como `text/plain; charset=utf-8` (`<nombre>.txt`). `pages` admite rangos (`1-3, 5`; vacío = todas): se extraen en el orden indicado y una página repetida se extrae otra vez (hasta 10 veces las páginas del PDF, mínimo 100, y 1000 caracteres). `page_separator` es `header` (por defecto, línea `--- Página N ---`), `formfeed` o `none`. Las cabeceras `X-Page-Count` y `X-Character-Count` indican páginas y caracteres. `400` si el PDF no contiene texto (escaneado: usar OCR antes). |
 | `POST` | `/api/documents` | Sube un PDF una sola vez (para **Organizar páginas** y **Firmar PDF**) y devuelve `id` y `pages`. |
 | `GET` | `/api/documents/{id}/pages/{n}` | Devuelve la página `n` como JPEG; `width` controla el ancho (100-2000 px, por defecto 300), con el tope de píxeles de las miniaturas. |
@@ -448,7 +467,7 @@ se envía al navegador: queda en el registro (`docker compose logs`).
 | `410` | El documento de **Organizar páginas** o **Firmar PDF** ha caducado (o el servidor se reinició); la página lo vuelve a subir. |
 | `413` | Un archivo supera `MAX_UPLOAD_MB`, el conjunto supera `MAX_TOTAL_UPLOAD_MB`, o la firma supera 10 MB. |
 | `503` | Falta LibreOffice, Ghostscript, OCRmyPDF o Tesseract (o un idioma de Tesseract), o el servidor está ocupado con otros trabajos grandes (con `Retry-After`). En `/health`, no se pueden guardar archivos temporales. |
-| `504` | La conversión de Office, la compresión, el OCR o **PDF a imágenes** tardó más que su tiempo máximo. |
+| `504` | La conversión de Office, la compresión, la conversión a PDF/A, la reparación, el OCR o **PDF a imágenes** tardó más que su tiempo máximo. |
 | `507` | **PDF a imágenes** no cabe en el disco temporal (según la estimación previa, o porque el disco se llenó durante la conversión). |
 
 ## Seguridad y privacidad

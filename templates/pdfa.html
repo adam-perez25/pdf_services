@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>PDF/A y reparar PDF | PDF Toolkit</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <main class="shell service-page">
+        <section class="intro">
+            <p class="eyebrow">SERVICIO 17 / PDF/A Y REPARAR</p>
+            <h1>Archiva o recupera<br><em>tus PDFs.</em></h1>
+            <p class="lede">Convierte un PDF a PDF/A para trámites y archivo, o vuelve a guardar uno dañado para que se abra con normalidad.</p>
+        </section>
+
+        <nav class="service-back" aria-label="Navegación del servicio">
+            <a class="back-button" href="/">&#8592; Menú</a>
+        </nav>
+
+        <section class="workspace" aria-labelledby="pdfa-title">
+            <div class="view-heading">
+                <h2 id="pdfa-title">Documento PDF</h2>
+                <p class="view-lede">Se procesa con Ghostscript. PDF/A convierte los colores a RGB, incrusta un perfil de color y no admite contraseñas.</p>
+            </div>
+
+            <form id="pdfa-form">
+                <label class="name-field">
+                    <span>Acción</span>
+                    <select id="pdfa-mode">
+                        <option value="pdfa" selected>Convertir a PDF/A: formato de archivo a largo plazo</option>
+                        <option value="repair">Reparar: volver a guardar un PDF dañado</option>
+                    </select>
+                </label>
+
+                <label class="dropzone" for="pdfa-input" id="pdfa-dropzone">
+                    <span class="drop-icon">+</span>
+                    <span><strong>Seleccionar PDF</strong><small id="pdfa-file-name">o arrástralo aquí</small></span>
+                    <input id="pdfa-input" type="file" accept="application/pdf,.pdf">
+                </label>
+
+                <label id="pdfa-part-field" class="name-field">
+                    <span>Versión de PDF/A</span>
+                    <select id="pdfa-part">
+                        <option value="1">PDF/A-1: la más estricta</option>
+                        <option value="2" selected>PDF/A-2: recomendada</option>
+                        <option value="3">PDF/A-3: admite archivos adjuntos</option>
+                    </select>
+                </label>
+
+                <label class="name-field">
+                    <span>Nombre del PDF</span>
+                    <input id="pdfa-output-name" type="text" value="documento-pdfa.pdf" maxlength="120" autocomplete="off">
+                </label>
+                <button class="primary-button" type="submit">
+                    <span id="pdfa-submit-label">Convertir y descargar</span>
+                    <span aria-hidden="true">&#8594;</span>
+                </button>
+            </form>
+            <p id="pdfa-status" class="status" role="status"></p>
+        </section>
+    </main>
+    <script src="/static/common.js"></script>
+    <script src="/static/pdfa.js"></script>
+</body>
+</html>

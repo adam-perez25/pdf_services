@@ -26,6 +26,7 @@ from app.routers import (
     office,
     pages,
     pdf_to_images,
+    pdfa,
     protect,
     sign,
     split,
@@ -91,3 +92,4 @@ app.include_router(metadata.router)
 app.include_router(extract_text.router)
 app.include_router(sign.router)
 app.include_router(ocr.router)
+app.include_router(pdfa.router)

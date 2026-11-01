@@ -53,6 +53,11 @@ async def compress_page():
     return render_page("compress.html")
 
 
+@router.get("/pdfa", response_class=HTMLResponse)
+async def pdfa_page():
+    return render_page("pdfa.html")
+
+
 @router.get("/pdf-to-images", response_class=HTMLResponse)
 async def pdf_to_images_page():
     return render_page("pdf-to-images.html")
