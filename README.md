@@ -305,6 +305,10 @@ tabla está en `HEAVY_JOB_ESTIMATES`) y la reserva de un presupuesto común,
   `HEAVY_JOB_MAX_WAITING` peticiones esperando, la respuesta es `503`
   («El servidor está ocupado con otros documentos grandes...») con la
   cabecera `Retry-After: 60`.
+- Un trabajo largo se puede cancelar: el botón **Cancelar** de la barra de
+  progreso detiene LibreOffice, Ghostscript o el OCR y libera su reserva, y
+  lo mismo ocurre si el navegador cierra la conexión (cerrar la pestaña).
+  Vale también para un trabajo que sigue esperando turno. Responde `499`.
 - `GET /health` muestra en `heavy_jobs` cuántos trabajos se están ejecutando
   (`running`), la memoria reservada (`reserved_mb`) y cuántos esperan
   (`waiting`).
@@ -421,6 +425,7 @@ estricta la rompería): la API se describe en esta tabla.
 | `POST` | `/api/documents/{id}/edit` | Genera el PDF editado a partir de `pages` (mismo formato que `/api/edit-pages`) sin volver a subir el archivo; después borra el documento subido. |
 | `POST` | `/api/documents/{id}/sign` | Firma el documento subido: `signature` es la imagen (PNG o JPEG; la transparencia del PNG se conserva) y `placements` una lista JSON como `[{"page": 1, "x": 0.6, "y": 0.8, "width": 0.3, "height": 0.08}]`, con la caja en fracciones (0-1) de la página tal como se ve (origen arriba a la izquierda, ya girada). Hasta 200 cajas, dentro de la página. Devuelve `firmado.pdf` y después borra el documento subido. |
 | `DELETE` | `/api/documents/{id}` | Elimina el documento subido (responde `204`). |
+| `POST` | `/api/jobs/{id}/cancel` | Detiene el trabajo en curso cuyo `id` (32 caracteres hexadecimales) se envió en la cabecera `X-Job-Id` de la petición original. Responde `{"cancelled": true}`, o `false` si ya había terminado. Las páginas lo usan con el botón **Cancelar**. |
 | `POST` | `/api/edit-pages` | Genera un PDF a partir de `file` y `pages`, una lista JSON como `[{"page": 3, "rotation": 90}]`; las páginas omitidas se eliminan. `page` y `rotation` deben ser números enteros (`1.7` o `true` responden `400`), la rotación múltiplo de 90 (el giro resultante se guarda entre 0 y 270) y la lista como máximo 10 veces las páginas del PDF (mínimo 100). |
 
 Los documentos subidos a `/api/documents` se borran en cuanto se descarga el
@@ -447,6 +452,7 @@ se envía al navegador: queda en el registro (`docker compose logs`).
 | `404` | Identificador de documento no válido, o página fuera de rango en `/api/documents/{id}/pages/{n}`. |
 | `410` | El documento de **Organizar páginas** o **Firmar PDF** ha caducado (o el servidor se reinició); la página lo vuelve a subir. |
 | `413` | Un archivo supera `MAX_UPLOAD_MB`, el conjunto supera `MAX_TOTAL_UPLOAD_MB`, o la firma supera 10 MB. |
+| `499` | El trabajo se canceló (botón **Cancelar**) antes de terminar. |
 | `503` | Falta LibreOffice, Ghostscript, OCRmyPDF o Tesseract (o un idioma de Tesseract), o el servidor está ocupado con otros trabajos grandes (con `Retry-After`). En `/health`, no se pueden guardar archivos temporales. |
 | `504` | La conversión de Office, la compresión, el OCR o **PDF a imágenes** tardó más que su tiempo máximo. |
 | `507` | **PDF a imágenes** no cabe en el disco temporal (según la estimación previa, o porque el disco se llenó durante la conversión). |

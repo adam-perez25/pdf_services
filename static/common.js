@@ -22,7 +22,8 @@ function statusSetter(element) {
 }
 
 // A bar shown just above the page's status line while a file is uploading,
-// then as a moving stripe while the server works on it.
+// then as a moving stripe while the server works on it, with a "Cancelar"
+// button that postForm wires to the request in flight.
 function uploadProgress(statusElement) {
     const container = document.createElement("div");
     container.className = "upload-progress";
@@ -32,13 +33,27 @@ function uploadProgress(statusElement) {
             <span class="upload-progress-bar"></span>
         </div>
         <span class="upload-progress-label"></span>
+        <button type="button" class="tool-button upload-progress-cancel">Cancelar</button>
     `;
     statusElement.before(container);
     const track = container.querySelector(".upload-progress-track");
     const bar = container.querySelector(".upload-progress-bar");
     const label = container.querySelector(".upload-progress-label");
+    const cancelButton = container.querySelector(".upload-progress-cancel");
+    let onCancel = null;
+    cancelButton.addEventListener("click", () => {
+        if (!onCancel) return;
+        cancelButton.disabled = true;
+        label.textContent = "Cancelando…";
+        onCancel();
+    });
 
     return {
+        // Set by postForm while a request is in flight; null when it ends.
+        setCancel(handler) {
+            onCancel = handler;
+            cancelButton.disabled = false;
+        },
         uploading(fraction) {
             const percent = Math.round(fraction * 100);
             container.hidden = false;
@@ -60,19 +75,37 @@ function uploadProgress(statusElement) {
     };
 }
 
+// A random id the server can cancel the job by. crypto.randomUUID needs a
+// secure context and the service is reached over plain http on the LAN.
+function newJobId() {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 // Sends a form like fetch does, but with XMLHttpRequest because fetch cannot
 // report upload progress. It resolves to a regular Response, so callers read
-// it exactly as they would a fetch result.
+// it exactly as they would a fetch result. The progress bar's "Cancelar"
+// button aborts the request and tells the server to stop the job (closing
+// the connection alone also stops it); the promise then rejects.
 function postForm(url, formData, progress) {
     return new Promise((resolve, reject) => {
         const request = new XMLHttpRequest();
+        const jobId = newJobId();
+        let cancelled = false;
         request.open("POST", url);
+        request.setRequestHeader("X-Job-Id", jobId);
         request.responseType = "blob";
+        progress?.setCancel(() => {
+            cancelled = true;
+            fetch(`/api/jobs/${jobId}/cancel`, { method: "POST", keepalive: true }).catch(() => {});
+            request.abort();
+        });
         request.upload.addEventListener("progress", (event) => {
             if (event.lengthComputable) progress?.uploading(event.loaded / event.total);
         });
         request.upload.addEventListener("load", () => progress?.processing());
         request.addEventListener("load", () => {
+            progress?.setCancel(null);
             progress?.hide();
             const headers = new Headers();
             request.getAllResponseHeaders().trim().split(/\r?\n/).forEach((line) => {
@@ -83,8 +116,9 @@ function postForm(url, formData, progress) {
             resolve(new Response(body, { status: request.status, headers }));
         });
         const fail = () => {
+            progress?.setCancel(null);
             progress?.hide();
-            reject(new Error("No se pudo conectar con el servidor."));
+            reject(new Error(cancelled ? "Trabajo cancelado." : "No se pudo conectar con el servidor."));
         };
         request.addEventListener("error", fail);
         request.addEventListener("abort", fail);

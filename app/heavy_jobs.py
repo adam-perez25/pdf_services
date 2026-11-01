@@ -19,7 +19,7 @@ import time
 
 from fastapi import HTTPException, UploadFile
 
-from app import config
+from app import cancellation, config
 from app.errors import logger
 
 
@@ -96,7 +96,11 @@ class HeavyJobLimiter:
         self.reserved_mb = 0
         self.running = 0
 
-    def acquire(self, megabytes: int, budget: int, wait_seconds: float, max_waiting: int | None = None) -> bool:
+    def acquire(
+        self, megabytes: int, budget: int, wait_seconds: float, max_waiting: int | None = None, cancel_check=None
+    ) -> bool:
+        """Wait for a turn; False if it did not come in time. With cancel_check,
+        the wait is cut into short slices and raises JobCancelled once it is true."""
         deadline = time.monotonic() + wait_seconds
         ticket = object()
         with self.condition:
@@ -111,6 +115,10 @@ class HeavyJobLimiter:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         return False
+                    if cancel_check is not None:
+                        if cancel_check():
+                            raise cancellation.JobCancelled()
+                        remaining = min(remaining, cancellation.POLL_SECONDS)
                     self.condition.wait(remaining)
                 self.reserved_mb += megabytes
                 self.running += 1
@@ -141,12 +149,21 @@ def heavy_job(megabytes: int, uploads: list[UploadFile] = ()):
     Use it around the processing only, after the cheap validations, so bad
     requests fail at once. If the turn does not come within
     HEAVY_JOB_WAIT_SECONDS it answers 503 with Retry-After (closing `uploads`,
-    like check_upload_sizes). The share is released even if the job fails.
+    like check_upload_sizes), or 499 if the job is cancelled while it waits. The share is released even if the job fails.
     """
     if megabytes < HEAVY_JOB_MIN_MB:
         yield
         return
-    if not HEAVY_JOBS.acquire(megabytes, config.HEAVY_JOB_BUDGET_MB, config.HEAVY_JOB_WAIT_SECONDS, config.HEAVY_JOB_MAX_WAITING):
+    try:
+        acquired = HEAVY_JOBS.acquire(
+            megabytes, config.HEAVY_JOB_BUDGET_MB, config.HEAVY_JOB_WAIT_SECONDS, config.HEAVY_JOB_MAX_WAITING,
+            cancellation.current_check(),
+        )
+    except cancellation.JobCancelled:
+        for upload in uploads:
+            upload.file.close()
+        raise
+    if not acquired:
         for upload in uploads:
             upload.file.close()
         raise HTTPException(

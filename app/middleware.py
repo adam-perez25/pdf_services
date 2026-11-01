@@ -1,11 +1,66 @@
-"""Middlewares: request-size limit, cross-site guard, no-cache for static
-files and the security headers. main.py adds them in a fixed order (see the
-comment there).
+"""Middlewares: client-disconnect watcher, request-size limit, cross-site
+guard, no-cache for static files and the security headers. main.py adds them
+in a fixed order (see the comment there).
 """
+import asyncio
+import threading
+
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
 from app import config
+from app.cancellation import CLIENT_GONE_KEY
+
+
+class ClientDisconnectWatcher:
+    """Tell long jobs that the client left, through a thread-safe flag.
+
+    A sync handler runs in a worker thread and Starlette never interrupts it
+    when the browser closes the connection. Starlette's own
+    request.is_disconnected() is unreliable under BaseHTTPMiddleware (it loses
+    the disconnect message), so once a POST /api body is fully received this
+    task is the only one waiting on the server for the disconnect, and sets
+    scope[CLIENT_GONE_KEY] (a threading.Event). Everything inside gets a
+    receive() that serves the body first and then waits for that same event.
+    Must be the outermost middleware.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["method"] != "POST" or not scope["path"].startswith("/api/"):
+            await self.app(scope, receive, send)
+            return
+        client_gone = threading.Event()
+        scope[CLIENT_GONE_KEY] = client_gone
+        disconnected = asyncio.Event()
+        watcher: asyncio.Task | None = None
+
+        async def watch():
+            while (await receive())["type"] != "http.disconnect":
+                pass
+            client_gone.set()
+            disconnected.set()
+
+        async def watching_receive():
+            nonlocal watcher
+            if watcher is not None:
+                await disconnected.wait()
+                return {"type": "http.disconnect"}
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                client_gone.set()
+                disconnected.set()
+            elif not message.get("more_body", False):
+                watcher = asyncio.get_running_loop().create_task(watch())
+            return message
+
+        try:
+            await self.app(scope, watching_receive, send)
+        finally:
+            if watcher is not None:
+                watcher.cancel()
 
 
 def max_request_bytes() -> int:
