@@ -17,7 +17,6 @@ from app.uploads import check_upload_sizes, clean_output_name, file_download, up
 router = APIRouter()
 
 
-# --- Numerar páginas y marca de agua -----------------------------------------
 # The text is drawn with the standard Helvetica font (every PDF viewer has it,
 # so nothing is embedded) in WinAnsi encoding, which covers Spanish accents.
 # Each page gets an overlay in its own coordinates, turned to match /Rotate so

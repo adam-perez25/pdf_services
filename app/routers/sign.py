@@ -20,7 +20,6 @@ from app.uploads import check_upload_sizes, clean_output_name, file_download, up
 router = APIRouter()
 
 
-# --- Firmar PDF (visual signature) -------------------------------------------
 # Places a drawn or uploaded signature image on pages of a document already in
 # the organizer's store. It is only a picture on the page, not a cryptographic
 # (digital) signature.
