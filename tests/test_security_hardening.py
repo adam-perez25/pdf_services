@@ -19,6 +19,7 @@ import app.errors as errors
 import app.external_tools as external_tools
 import app.heavy_jobs as heavy_jobs
 import app.image_helpers as image_helpers
+import app.middleware as middleware
 import app.pdf_helpers as pdf_helpers
 import app.uploads as uploads
 from conftest import make_pdf, make_png
@@ -383,7 +384,7 @@ def pdf_info(client, headers):
 def test_cross_site_post_is_rejected(client, headers):
     response = pdf_info(client, headers)
     assert response.status_code == 403
-    assert response.json()["detail"] == main.CROSS_SITE_MESSAGE
+    assert response.json()["detail"] == middleware.CROSS_SITE_MESSAGE
     assert response.headers["X-Frame-Options"] == "DENY"
 
 

@@ -2,6 +2,7 @@ import pytest
 
 import app.main as main
 import app.config as config
+import app.middleware as middleware
 
 
 @pytest.mark.parametrize("path", ["/", "/pages", "/health", "/static/common.js"])
@@ -9,7 +10,7 @@ def test_responses_carry_security_headers(client, path):
     response = client.get(path)
 
     assert response.status_code == 200
-    for name, value in main.SECURITY_HEADERS.items():
+    for name, value in middleware.SECURITY_HEADERS.items():
         assert response.headers[name] == value
 
 
