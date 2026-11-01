@@ -138,7 +138,7 @@ const TOOLS = [
             if (event.key === "Escape" && search.value) {
                 search.value = "";
                 filter();
-            } else if (event.key === "Enter") {
+            } else if (event.key === "Enter" && search.value.trim()) {
                 const first = cards.find((card) => !card.item.hidden);
                 if (first) first.item.querySelector("a").click();
             }
