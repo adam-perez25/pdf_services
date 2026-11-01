@@ -5,6 +5,7 @@ const pagesToolbar = document.querySelector("#pages-toolbar");
 const pagesReset = document.querySelector("#pages-reset");
 const pagesEmpty = document.querySelector("#pages-empty");
 const pageGrid = document.querySelector("#page-grid");
+const pagesHelp = document.querySelector("#pages-help");
 const pageCount = document.querySelector("#page-count");
 const pagesForm = document.querySelector("#pages-form");
 const pagesOutputName = document.querySelector("#pages-output-name");
@@ -148,6 +149,7 @@ function renderPages() {
         ? "Has eliminado todas las páginas. Pulsa Restablecer para recuperarlas."
         : "Selecciona un PDF para ver sus páginas.";
     pagesToolbar.hidden = documentPages === 0;
+    pagesHelp.hidden = pages.length < 2;
     const removed = documentPages - pages.length;
     pageCount.textContent = `${pages.length} ${pages.length === 1 ? "página" : "páginas"}`
         + (removed > 0 ? ` · ${removed} eliminada${removed === 1 ? "" : "s"}` : "");
@@ -166,12 +168,13 @@ function renderPages() {
             </div>
             <div class="page-actions">
                 <button class="move-button" type="button" data-action="left" aria-label="Mover página ${page.page} antes">&#8592;</button>
+                <button class="move-button" type="button" data-action="right" aria-label="Mover página ${page.page} después">&#8594;</button>
                 <button class="move-button" type="button" data-action="ccw" aria-label="Girar página ${page.page} a la izquierda">&#8634;</button>
                 <button class="move-button" type="button" data-action="cw" aria-label="Girar página ${page.page} a la derecha">&#8635;</button>
                 <button class="remove-button" type="button" data-action="remove" aria-label="Eliminar página ${page.page}">&times;</button>
-                <button class="move-button" type="button" data-action="right" aria-label="Mover página ${page.page} después">&#8594;</button>
             </div>
         `;
+        item.querySelector(".page-meta").prepend(dragHandle(`Mover página ${page.page}`));
         // Set from script: the Content-Security-Policy blocks inline style attributes.
         item.querySelector(".page-thumb img").style.transform = `rotate(${page.rotation}deg)`;
 
@@ -209,6 +212,26 @@ function movePage(fromIndex, toIndex) {
     renderPages();
 }
 
+// Keyboard reordering on a page's handle: left/up moves it earlier,
+// right/down later, and the focus follows the page.
+const pagesAnnouncer = document.createElement("p");
+pagesAnnouncer.className = "visually-hidden";
+pagesAnnouncer.setAttribute("aria-live", "assertive");
+pageGrid.after(pagesAnnouncer);
+
+pageGrid.addEventListener("keydown", (event) => {
+    const handle = event.target.closest?.(".drag-handle");
+    const offset = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[event.key];
+    if (!handle || !offset) return;
+    event.preventDefault();
+    const from = Number(handle.closest(".page-card").dataset.index);
+    const to = from + offset;
+    if (to < 0 || to >= pages.length) return;
+    movePage(from, to);
+    pageGrid.querySelector(`.page-card[data-index="${to}"] .drag-handle`)?.focus();
+    pagesAnnouncer.textContent = `Página ${pages[to].page}: posición ${to + 1} de ${pages.length}.`;
+});
+
 function rotatePage(index, degrees) {
     pages[index].rotation += degrees;
     renderPages();
@@ -236,7 +259,13 @@ function startDrag(event, item) {
         holdTimer: null,
         scrollFrame: null,
     };
-    if (drag.isTouch) drag.holdTimer = setTimeout(activateDrag, TOUCH_HOLD_MS);
+    // The handle drags at once; elsewhere on the card a touch needs a hold.
+    if (event.target.closest(".drag-handle")) {
+        event.preventDefault();
+        activateDrag();
+    } else if (drag.isTouch) {
+        drag.holdTimer = setTimeout(activateDrag, TOUCH_HOLD_MS);
+    }
     document.addEventListener("pointermove", moveDrag);
     document.addEventListener("pointerup", endDrag);
     document.addEventListener("pointercancel", cancelDrag);
@@ -437,7 +466,7 @@ pagesForm.addEventListener("submit", async (event) => {
         documentExpired = true;
 
         downloadBlob(await response.blob(), withPdfExtension(name));
-        setStatus("PDF creado y descargado.", false);
+        setStatus("PDF creado y descargado.", "done");
     } catch (error) {
         setStatus(error.message, true);
     }

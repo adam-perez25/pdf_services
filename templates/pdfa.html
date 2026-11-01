@@ -26,40 +26,51 @@
                 <p class="view-lede">Se procesa con Ghostscript. PDF/A convierte los colores a RGB, incrusta un perfil de color y no admite contraseñas.</p>
             </div>
 
-            <form id="pdfa-form">
-                <label class="name-field">
-                    <span>Acción</span>
-                    <select id="pdfa-mode">
-                        <option value="pdfa" selected>Convertir a PDF/A: formato de archivo a largo plazo</option>
-                        <option value="repair">Reparar: volver a guardar un PDF dañado</option>
-                    </select>
-                </label>
+            <ol class="steps" aria-label="Pasos">
+                <li class="step" aria-current="step"><span class="step-number">1</span>Elige el archivo</li>
+                <li class="step"><span class="step-number">2</span>Ajusta</li>
+                <li class="step"><span class="step-number">3</span>Descarga</li>
+            </ol>
 
-                <label class="dropzone" for="pdfa-input" id="pdfa-dropzone">
-                    <span class="drop-icon">+</span>
-                    <span><strong>Seleccionar PDF</strong><small id="pdfa-file-name">o arrástralo aquí</small></span>
-                    <input id="pdfa-input" type="file" accept="application/pdf,.pdf">
-                </label>
+            <form class="tool-layout" id="pdfa-form">
+                <div class="tool-files">
+                    <label class="dropzone" for="pdfa-input" id="pdfa-dropzone">
+                        <span class="drop-icon">+</span>
+                        <span><strong>Seleccionar PDF</strong><small id="pdfa-file-name">o arrástralo aquí</small></span>
+                        <input id="pdfa-input" type="file" accept="application/pdf,.pdf">
+                    </label>
+                </div>
+                <div class="tool-options">
+                    <label class="name-field">
+                        <span>Acción</span>
+                        <select id="pdfa-mode">
+                            <option value="pdfa" selected>Convertir a PDF/A: formato de archivo a largo plazo</option>
+                            <option value="repair">Reparar: volver a guardar un PDF dañado</option>
+                        </select>
+                    </label>
 
-                <label id="pdfa-part-field" class="name-field">
-                    <span>Versión de PDF/A</span>
-                    <select id="pdfa-part">
-                        <option value="1">PDF/A-1: la más estricta</option>
-                        <option value="2" selected>PDF/A-2: recomendada</option>
-                        <option value="3">PDF/A-3: admite archivos adjuntos</option>
-                    </select>
-                </label>
+                    <label id="pdfa-part-field" class="name-field">
+                        <span>Versión de PDF/A</span>
+                        <select id="pdfa-part">
+                            <option value="1">PDF/A-1: la más estricta</option>
+                            <option value="2" selected>PDF/A-2: recomendada</option>
+                            <option value="3">PDF/A-3: admite archivos adjuntos</option>
+                        </select>
+                    </label>
 
-                <label class="name-field">
-                    <span>Nombre del PDF</span>
-                    <input id="pdfa-output-name" type="text" value="documento-pdfa.pdf" maxlength="120" autocomplete="off">
-                </label>
-                <button class="primary-button" type="submit">
-                    <span id="pdfa-submit-label">Convertir y descargar</span>
-                    <span aria-hidden="true">&#8594;</span>
-                </button>
+                    <label class="name-field">
+                        <span>Nombre del PDF</span>
+                        <input id="pdfa-output-name" type="text" value="documento-pdfa.pdf" maxlength="120" autocomplete="off">
+                    </label>
+                    <div class="action-bar">
+                        <button class="primary-button" type="submit">
+                            <span id="pdfa-submit-label">Convertir y descargar</span>
+                            <span aria-hidden="true">&#8594;</span>
+                        </button>
+                        <p id="pdfa-status" class="status" role="status"></p>
+                    </div>
+                </div>
             </form>
-            <p id="pdfa-status" class="status" role="status"></p>
         </section>
     </main>
     </div>

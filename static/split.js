@@ -88,7 +88,7 @@ splitForm.addEventListener("submit", async (event) => {
         resetSplitForm();
         setSplitStatus(blob.type === "application/zip"
             ? `PDFs creados y descargados en ${filename}.`
-            : "PDF creado y descargado.", false);
+            : "PDF creado y descargado.", "done");
     } catch (error) {
         setSplitStatus(error.message, true);
     }

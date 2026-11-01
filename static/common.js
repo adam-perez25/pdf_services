@@ -10,15 +10,144 @@ function setupDropzone(dropzone, onDrop) {
     dropzone.addEventListener("drop", (event) => {
         event.preventDefault();
         dropzone.classList.remove("is-dragging");
+        markStep(2);
         onDrop([...event.dataTransfer.files]);
     });
 }
 
+// The "1 Elige, 2 Ajusta, 3 Descarga" strip at the top of a tool page
+// (ol.steps). Choosing a file moves it to step 2; a "done" status (a finished
+// download) marks step 3.
+function markStep(number) {
+    document.querySelectorAll(".steps").forEach((strip) => {
+        [...strip.children].forEach((step, index) => {
+            step.classList.toggle("is-done", index + 1 < number || (number === 3 && index === 2));
+            if (index + 1 === number) step.setAttribute("aria-current", "step");
+            else step.removeAttribute("aria-current");
+        });
+    });
+}
+
+document.addEventListener("change", (event) => {
+    if (event.target.matches?.('input[type="file"]') && event.target.files.length) markStep(2);
+});
+
+// state: true for an error, "done" when the result was downloaded (shown as
+// the result panel), false for progress and other messages.
 function statusSetter(element) {
-    return (message, isError) => {
+    return (message, state) => {
         element.textContent = message;
-        element.classList.toggle("is-error", isError);
+        element.classList.toggle("is-error", state === true);
+        element.classList.toggle("is-done", state === "done" && Boolean(message));
+        if (state === "done") markStep(3);
     };
+}
+
+// Reorderable lists (merge, images, workflow steps). Each movable item is an
+// li with data-index and a dragHandle() button. The handle drags with mouse or
+// touch, showing a line where the item will land, and moves the item with the
+// arrow keys. move(from, to) changes the data and re-renders; canMove(from, to)
+// can refuse a position; describe(index) names an item for screen readers.
+function dragHandle(label) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "drag-handle";
+    button.setAttribute("aria-label", `${label}. Usa las flechas arriba y abajo para moverlo`);
+    button.innerHTML = '<span aria-hidden="true">&#10303;</span>';
+    return button;
+}
+
+function reorderableList(list, { move, canMove = () => true, describe }) {
+    const announcer = document.createElement("p");
+    announcer.className = "visually-hidden";
+    announcer.setAttribute("aria-live", "assertive");
+    list.after(announcer);
+    const line = document.createElement("div");
+    line.className = "drop-line";
+    line.hidden = true;
+    let drag = null;
+
+    const items = () => [...list.querySelectorAll(":scope > li[data-index]")];
+    const indexOf = (handle) => Number(handle.closest("li[data-index]").dataset.index);
+
+    function moveAndFocus(from, to) {
+        if (to === from || to < 0 || to >= items().length || !canMove(from, to)) return false;
+        move(from, to);
+        list.querySelector(`:scope > li[data-index="${to}"] .drag-handle`)?.focus();
+        announcer.textContent = `${describe(to)}: posición ${to + 1} de ${items().length}.`;
+        return true;
+    }
+
+    list.addEventListener("keydown", (event) => {
+        const handle = event.target.closest?.(".drag-handle");
+        if (!handle || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
+        event.preventDefault();
+        const from = indexOf(handle);
+        moveAndFocus(from, from + (event.key === "ArrowUp" ? -1 : 1));
+    });
+
+    // Where the dragged item would land: the slot before the first item whose
+    // middle is below the pointer, turned into the index after removal.
+    function target(y) {
+        const all = items();
+        let slot = all.findIndex((item) => {
+            const rect = item.getBoundingClientRect();
+            return y < rect.top + rect.height / 2;
+        });
+        if (slot === -1) slot = all.length;
+        return { slot, to: slot > drag.from ? slot - 1 : slot, all };
+    }
+
+    function showLine(y) {
+        const { slot, to, all } = target(y);
+        drag.to = to;
+        if (to === drag.from || !canMove(drag.from, to)) {
+            line.hidden = true;
+            return;
+        }
+        const listRect = list.getBoundingClientRect();
+        const edge = slot < all.length
+            ? all[slot].getBoundingClientRect().top - 4
+            : all[all.length - 1].getBoundingClientRect().bottom + 4;
+        line.style.top = `${edge - listRect.top - 2}px`;
+        line.hidden = false;
+    }
+
+    list.addEventListener("pointerdown", (event) => {
+        const handle = event.target.closest?.(".drag-handle");
+        if (!handle || event.button !== 0 || drag) return;
+        event.preventDefault();
+        // Keeps the moves and the release coming to the handle; it throws for
+        // a pointer that is already gone, and the drag still works without it.
+        try {
+            handle.setPointerCapture(event.pointerId);
+        } catch {}
+        const item = handle.closest("li[data-index]");
+        drag = { handle, item, from: Number(item.dataset.index), to: null, pointerId: event.pointerId };
+        item.classList.add("is-dragging");
+        document.body.classList.add("is-reordering");
+        list.append(line);
+    });
+
+    list.addEventListener("pointermove", (event) => {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        if (event.clientY < 60) window.scrollBy(0, -10);
+        else if (event.clientY > window.innerHeight - 60) window.scrollBy(0, 10);
+        showLine(event.clientY);
+    });
+
+    function endDrag(event, drop) {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        const { from, to, item } = drag;
+        drag = null;
+        item.classList.remove("is-dragging");
+        document.body.classList.remove("is-reordering");
+        line.hidden = true;
+        line.remove();
+        if (drop && to !== null) moveAndFocus(from, to);
+    }
+    list.addEventListener("pointerup", (event) => endDrag(event, true));
+    list.addEventListener("pointercancel", (event) => endDrag(event, false));
 }
 
 // A bar shown just above the page's status line while a file is uploading,

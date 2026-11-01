@@ -26,32 +26,43 @@
                 <p class="view-lede">Pensado para documentos escaneados o fotografiados. El reconocimiento se hace con Tesseract y tarda varios segundos por página; las páginas que ya tienen texto se dejan como están.</p>
             </div>
 
-            <form id="ocr-form">
-                <label class="dropzone" for="ocr-input" id="ocr-dropzone">
-                    <span class="drop-icon">+</span>
-                    <span><strong>Seleccionar PDF</strong><small id="ocr-file-name">o arrástralo aquí</small></span>
-                    <input id="ocr-input" type="file" accept="application/pdf,.pdf">
-                </label>
+            <ol class="steps" aria-label="Pasos">
+                <li class="step" aria-current="step"><span class="step-number">1</span>Elige el archivo</li>
+                <li class="step"><span class="step-number">2</span>Ajusta</li>
+                <li class="step"><span class="step-number">3</span>Descarga</li>
+            </ol>
 
-                <label class="name-field">
-                    <span>Idioma del documento</span>
-                    <select id="ocr-language">
-                        <option value="spa" selected>Español</option>
-                        <option value="eng">Inglés</option>
-                        <option value="spa+eng">Español e inglés</option>
-                    </select>
-                </label>
+            <form class="tool-layout" id="ocr-form">
+                <div class="tool-files">
+                    <label class="dropzone" for="ocr-input" id="ocr-dropzone">
+                        <span class="drop-icon">+</span>
+                        <span><strong>Seleccionar PDF</strong><small id="ocr-file-name">o arrástralo aquí</small></span>
+                        <input id="ocr-input" type="file" accept="application/pdf,.pdf">
+                    </label>
+                </div>
+                <div class="tool-options">
+                    <label class="name-field">
+                        <span>Idioma del documento</span>
+                        <select id="ocr-language">
+                            <option value="spa" selected>Español</option>
+                            <option value="eng">Inglés</option>
+                            <option value="spa+eng">Español e inglés</option>
+                        </select>
+                    </label>
 
-                <label class="name-field">
-                    <span>Nombre del PDF</span>
-                    <input id="ocr-output-name" type="text" value="documento-ocr.pdf" maxlength="120" autocomplete="off">
-                </label>
-                <button class="primary-button" type="submit">
-                    <span>Aplicar OCR y descargar</span>
-                    <span aria-hidden="true">&#8594;</span>
-                </button>
+                    <label class="name-field">
+                        <span>Nombre del PDF</span>
+                        <input id="ocr-output-name" type="text" value="documento-ocr.pdf" maxlength="120" autocomplete="off">
+                    </label>
+                    <div class="action-bar">
+                        <button class="primary-button" type="submit">
+                            <span>Aplicar OCR y descargar</span>
+                            <span aria-hidden="true">&#8594;</span>
+                        </button>
+                        <p id="ocr-status" class="status" role="status"></p>
+                    </div>
+                </div>
             </form>
-            <p id="ocr-status" class="status" role="status"></p>
         </section>
     </main>
     </div>

@@ -21,41 +21,42 @@
         </section>
 
         <section class="workspace" aria-labelledby="files-title">
-            <div class="section-heading">
-                <div>
-                    <p class="eyebrow">Documentos</p>
-                    <h2 id="files-title">Tu selección</h2>
+            <ol class="steps" aria-label="Pasos">
+                <li class="step" aria-current="step"><span class="step-number">1</span>Elige los archivos</li>
+                <li class="step"><span class="step-number">2</span>Ordena</li>
+                <li class="step"><span class="step-number">3</span>Descarga</li>
+            </ol>
+
+            <form class="tool-layout" id="merge-form">
+                <div class="tool-files">
+                    <div class="section-heading">
+                        <h2 id="files-title">Tu selección</h2>
+                        <span id="file-count" class="counter">0 archivos</span>
+                    </div>
+
+                    <label class="dropzone" for="file-input" id="dropzone">
+                        <span class="drop-icon">+</span>
+                        <span><strong>Seleccionar PDFs</strong><small>o arrástralos aquí</small></span>
+                        <input id="file-input" type="file" accept="application/pdf,.pdf" multiple>
+                    </label>
+
+                    <div id="empty-state" class="empty-state">Todavía no has seleccionado ningún archivo.</div>
+                    <ol id="file-list" class="file-list"></ol>
                 </div>
-                <span id="file-count" class="counter">0 archivos</span>
-            </div>
-
-            <label class="dropzone" for="file-input" id="dropzone">
-                <span class="drop-icon">+</span>
-                <span><strong>Seleccionar PDFs</strong><small>o arrástralos aquí</small></span>
-                <input id="file-input" type="file" accept="application/pdf,.pdf" multiple>
-            </label>
-
-            <div id="empty-state" class="empty-state">Todavía no has seleccionado ningún archivo.</div>
-            <ol id="file-list" class="file-list" aria-live="polite"></ol>
-
-            <div class="section-heading output-heading">
-                <div>
-                    <p class="eyebrow">Exportar</p>
-                    <h2>Nombre del resultado</h2>
+                <div class="tool-options">
+                    <label class="name-field">
+                        <span>Nombre del PDF</span>
+                        <input id="output-name" type="text" value="merged.pdf" maxlength="120" autocomplete="off">
+                    </label>
+                    <div class="action-bar">
+                        <button class="primary-button" type="submit">
+                            <span>Unir y descargar</span>
+                            <span aria-hidden="true">&#8594;</span>
+                        </button>
+                        <p id="status" class="status" role="status"></p>
+                    </div>
                 </div>
-            </div>
-
-            <form id="merge-form">
-                <label class="name-field">
-                    <span>Nombre del PDF</span>
-                    <input id="output-name" type="text" value="merged.pdf" maxlength="120" autocomplete="off">
-                </label>
-                <button class="primary-button" type="submit">
-                    <span>Unir y descargar</span>
-                    <span aria-hidden="true">&#8594;</span>
-                </button>
             </form>
-            <p id="status" class="status" role="status"></p>
         </section>
     </main>
     </div>

@@ -89,7 +89,7 @@ pdfaForm.addEventListener("submit", async (event) => {
         if (!response.ok) throw new Error(await errorMessage(response, mode.failed));
 
         downloadBlob(await response.blob(), withPdfExtension(name));
-        setStatus(mode.done, false);
+        setStatus(mode.done, "done");
         resetPdfaForm();
     } catch (error) {
         setStatus(error.message, true);

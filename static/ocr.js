@@ -48,7 +48,7 @@ ocrForm.addEventListener("submit", async (event) => {
         if (!response.ok) throw new Error(await errorMessage(response, "No se pudo aplicar el OCR al PDF."));
 
         downloadBlob(await response.blob(), withPdfExtension(name));
-        setStatus("PDF con texto buscable descargado.", false);
+        setStatus("PDF con texto buscable descargado.", "done");
         resetOcrForm();
     } catch (error) {
         setStatus(error.message, true);

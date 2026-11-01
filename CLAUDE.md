@@ -110,7 +110,7 @@ Spanish-language web PDF toolkit: `FastAPI(title="Unir PDF")` in `app/main.py` (
 ### Gotchas
 - Keep in sync:
   - README API table and config table <-> endpoints in `app/routers/` and constants in `app/config.py` (fixed ones in their module).
-  - A new tool needs a router, a page route, `templates/x.html` (with the side nav markup), a `TOOLS` entry in `static/tools.js` plus a `<noscript>` link in `templates/index.html`, a test file and a README row.
+  - A new tool needs a router, a page route, `templates/x.html` (with the side nav markup and the step strip + `tool-layout` / `action-bar` structure), a `TOOLS` entry in `static/tools.js` plus a `<noscript>` link in `templates/index.html`, a test file and a README row.
   - A new single-file PDF tool can join the workflow with one `STEP_DEFINITIONS` entry in `static/workflow.js` (choose its `position`: start, first, normal, late, archive, last); if its endpoint is renamed, update workflow.js too (test_workflow checks every referenced `/api/...` route exists).
   - `ALLOWED_IMAGE_FORMATS` <-> `accept` in `templates/images.html`; the Office extensions <-> `accept`/`data-extensions` in word/excel/powerpoint.html.
   - Dockerfile copies only `app`, `static`, `templates`, so a new top-level dir needs a COPY.

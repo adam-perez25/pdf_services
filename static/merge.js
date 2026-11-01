@@ -10,7 +10,6 @@ const setStatus = statusSetter(status);
 const progress = uploadProgress(status);
 
 let selectedFiles = [];
-let draggedIndex = null;
 
 fileInput.addEventListener("change", () => {
     selectedFiles = [...fileInput.files];
@@ -30,7 +29,7 @@ function renderFiles() {
     selectedFiles.forEach((file, index) => {
         const item = document.createElement("li");
         item.className = "file-item";
-        item.draggable = true;
+        item.dataset.index = index;
         item.innerHTML = `
             <span class="file-number">${String(index + 1).padStart(2, "0")}</span>
             <span class="file-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
@@ -39,16 +38,7 @@ function renderFiles() {
             <button class="remove-button" type="button" aria-label="Eliminar ${escapeHtml(file.name)}">&times;</button>
         `;
 
-        item.addEventListener("dragstart", () => {
-            draggedIndex = index;
-            item.classList.add("is-dragging");
-        });
-        item.addEventListener("dragend", () => item.classList.remove("is-dragging"));
-        item.addEventListener("dragover", (event) => event.preventDefault());
-        item.addEventListener("drop", (event) => {
-            event.stopPropagation();
-            moveFile(draggedIndex, index);
-        });
+        item.prepend(dragHandle(`Mover ${file.name}`));
         item.querySelector('[data-action="up"]').addEventListener("click", () => moveFile(index, index - 1));
         item.querySelector('[data-action="down"]').addEventListener("click", () => moveFile(index, index + 1));
         item.querySelector(".remove-button").addEventListener("click", () => {
@@ -58,6 +48,11 @@ function renderFiles() {
         fileList.appendChild(item);
     });
 }
+
+reorderableList(fileList, {
+    move: moveFile,
+    describe: (index) => selectedFiles[index].name,
+});
 
 function moveFile(fromIndex, toIndex) {
     if (fromIndex === null || toIndex < 0 || toIndex >= selectedFiles.length || fromIndex === toIndex) return;
@@ -93,7 +88,7 @@ mergeForm.addEventListener("submit", async (event) => {
         selectedFiles = [];
         outputName.value = "merged.pdf";
         renderFiles();
-        setStatus("PDF creado y descargado.", false);
+        setStatus("PDF creado y descargado.", "done");
     } catch (error) {
         setStatus(error.message, true);
     }

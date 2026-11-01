@@ -21,64 +21,62 @@
         </section>
 
         <section class="workspace" aria-labelledby="workflow-files-title">
-            <div class="section-heading">
-                <div>
-                    <p class="eyebrow">Documentos</p>
-                    <h2 id="workflow-files-title">Tu selección</h2>
-                </div>
-                <span id="workflow-file-count" class="counter">0 archivos</span>
-            </div>
+            <ol class="steps" aria-label="Pasos">
+                <li class="step" aria-current="step"><span class="step-number">1</span>Elige los archivos</li>
+                <li class="step"><span class="step-number">2</span>Elige los pasos</li>
+                <li class="step"><span class="step-number">3</span>Descarga</li>
+            </ol>
 
-            <label class="dropzone" for="workflow-input" id="workflow-dropzone">
-                <span class="drop-icon">+</span>
-                <span><strong>Seleccionar PDFs</strong><small>o arrástralos aquí. Si eliges varios, el primer paso será unirlos.</small></span>
-                <input id="workflow-input" type="file" accept="application/pdf,.pdf" multiple>
-            </label>
-
-            <div id="workflow-empty-files" class="empty-state">Todavía no has seleccionado ningún archivo.</div>
-            <ol id="workflow-files" class="file-list" aria-live="polite"></ol>
-
-            <form id="workflow-form" novalidate>
-                <div class="section-heading output-heading">
-                    <div>
-                        <p class="eyebrow">Pasos</p>
-                        <h2>Qué hacer y en qué orden</h2>
+            <form class="tool-layout is-wide" id="workflow-form" novalidate>
+                <div class="tool-files">
+                    <div class="section-heading">
+                        <h2 id="workflow-files-title">Tu selección</h2>
+                        <span id="workflow-file-count" class="counter">0 archivos</span>
                     </div>
-                    <span id="workflow-step-count" class="counter">0 pasos</span>
-                </div>
-                <p class="view-lede">Cada paso usa el resultado del anterior. Algunos tienen un sitio fijo: «Reparar PDF» va antes que todo, el OCR va siempre el primero (el texto que añaden la numeración o la marca de agua se excluye del reconocimiento y taparía parte del escaneo), los metadatos casi al final (comprimir y el OCR añaden los suyos), «Convertir a PDF/A» después de ellos y «Proteger con contraseña» siempre al final, porque después ya no se puede modificar el PDF.</p>
 
-                <div id="workflow-empty-steps" class="empty-state workflow-empty-steps">Añade al menos un paso.</div>
-                <ol id="workflow-steps" class="workflow-steps" aria-live="polite"></ol>
-
-                <div class="workflow-add">
-                    <label class="name-field">
-                        <span>Añadir paso</span>
-                        <select id="workflow-add-select"></select>
+                    <label class="dropzone" for="workflow-input" id="workflow-dropzone">
+                        <span class="drop-icon">+</span>
+                        <span><strong>Seleccionar PDFs</strong><small>o arrástralos aquí. Si eliges varios, el primer paso será unirlos.</small></span>
+                        <input id="workflow-input" type="file" accept="application/pdf,.pdf" multiple>
                     </label>
-                    <button id="workflow-add-button" class="tool-button" type="button">Añadir</button>
-                </div>
 
-                <div class="section-heading output-heading">
-                    <div>
-                        <p class="eyebrow">Exportar</p>
-                        <h2>Nombre del resultado</h2>
+                    <div id="workflow-empty-files" class="empty-state">Todavía no has seleccionado ningún archivo.</div>
+                    <ol id="workflow-files" class="file-list"></ol>
+
+                    <div class="section-heading output-heading">
+                        <h2>Qué hacer y en qué orden</h2>
+                        <span id="workflow-step-count" class="counter">0 pasos</span>
+                    </div>
+                    <p class="view-lede">Cada paso usa el resultado del anterior. Algunos tienen un sitio fijo: «Reparar PDF» va antes que todo, el OCR va siempre el primero (el texto que añaden la numeración o la marca de agua se excluye del reconocimiento y taparía parte del escaneo), los metadatos casi al final (comprimir y el OCR añaden los suyos), «Convertir a PDF/A» después de ellos y «Proteger con contraseña» siempre al final, porque después ya no se puede modificar el PDF.</p>
+
+                    <div id="workflow-empty-steps" class="empty-state workflow-empty-steps">Añade al menos un paso.</div>
+                    <ol id="workflow-steps" class="workflow-steps"></ol>
+
+                    <div class="workflow-add">
+                        <label class="name-field">
+                            <span>Añadir paso</span>
+                            <select id="workflow-add-select"></select>
+                        </label>
+                        <button id="workflow-add-button" class="tool-button" type="button">Añadir</button>
                     </div>
                 </div>
-
-                <label class="name-field">
-                    <span>Nombre del PDF</span>
-                    <input id="workflow-output-name" type="text" value="documento-procesado.pdf" maxlength="120" autocomplete="off">
-                </label>
-                <button id="workflow-submit" class="primary-button" type="submit">
-                    <span>Ejecutar y descargar</span>
-                    <span aria-hidden="true">&#8594;</span>
-                </button>
+                <div class="tool-options">
+                    <label class="name-field">
+                        <span>Nombre del PDF</span>
+                        <input id="workflow-output-name" type="text" value="documento-procesado.pdf" maxlength="120" autocomplete="off">
+                    </label>
+                    <div class="action-bar">
+                        <button id="workflow-submit" class="primary-button" type="submit">
+                            <span>Ejecutar y descargar</span>
+                            <span aria-hidden="true">&#8594;</span>
+                        </button>
+                        <p id="workflow-status" class="status" role="status"></p>
+                        <div id="workflow-fallback" class="workflow-fallback" hidden>
+                            <button id="workflow-fallback-button" class="tool-button" type="button">Descargar el último resultado intermedio</button>
+                        </div>
+                    </div>
+                </div>
             </form>
-            <p id="workflow-status" class="status" role="status"></p>
-            <div id="workflow-fallback" class="workflow-fallback" hidden>
-                <button id="workflow-fallback-button" class="tool-button" type="button">Descargar el último resultado intermedio</button>
-            </div>
         </section>
     </main>
     </div>

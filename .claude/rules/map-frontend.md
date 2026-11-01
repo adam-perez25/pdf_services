@@ -10,6 +10,7 @@ paths:
   - the side navigation on every tool page, into `nav#side-nav` (body `.tool-page`, inside `div.app-layout`; the static `a.back-button` to `/` is the no-JS fallback): brand, `.nav-toggle` "Herramientas" (phones; `aria-expanded`, Esc closes), group headings and links with `aria-current="page"`. A sidebar from 960 px.
   - the home page (`index.html`): grouped `.tool-card`s into `#tool-groups`, the `#tool-search` box (hidden in the HTML, shown by the script; `/` focuses it, Enter opens the first match, Esc clears; accent-insensitive) and `#tool-search-empty`. A `<noscript>` list links every tool.
   - A new tool needs a `TOOLS` entry and a `<noscript>` link (test_navigation checks both against the page routes). Tool-page eyebrows show the group title.
+- Tool page layout (every tool, checked by test_navigation): inside `section.workspace` an `ol.steps` strip (3 `li.step`, the first with `aria-current="step"`; step 2's label varies, e.g. "Ajusta", "Ordena") and a `form.tool-layout` (`.is-wide` for pages, sign and workflow) holding `div.tool-files` (dropzone, lists, previews) then `div.tool-options` (fields) ending in `div.action-bar` with the `.primary-button` and the page's `p.status`. Two columns from a 720 px workspace (a container query on `.workspace`); the action bar sticks to the top beside the files, or to the bottom of the screen in one column. Element ids are unchanged. extract-text keeps its preview below the form.
 - Scripts load at the bottom of each template: `/static/tools.js`, then `/static/common.js`, then the page's own JS. They are plain globals (no modules).
 
   | Template | Script |
@@ -18,7 +19,7 @@ paths:
   | split | split.js |
   | images | images.js |
   | word, excel, powerpoint | office.js (shared) |
-  | pages | pages.js (document store) |
+  | pages | pages.js (document store; its own pointer drag with a placeholder card, plus a `dragHandle` in each card's `.page-meta` that drags at once on touch and moves with the arrow keys; `#pages-help` shows with 2+ pages; actions: move row then rotate/remove row) |
   | compress | compress.js |
   | pdf-to-images | pdf-to-images.js (optional `#pdf-images-pages` sent as `pages`, cleared after a conversion; 400/504/507 shown via `errorMessage`) |
   | protect | protect.js (Proteger/Desbloquear select; password only in the multipart body) |
@@ -32,7 +33,9 @@ paths:
 
 - `office.js` is configured by data attributes on `#office-form`: `data-endpoint`, `data-extensions` (comma-separated, no dots), `data-default-name` (Spanish: `documento.pdf`, `hoja-de-calculo.pdf`, `presentacion.pdf`), `data-missing-file`. Choosing a file prefills the name with its stem + `.pdf`. Element ids are the same on all three pages (`office-input`, `office-dropzone`, `office-file-name`, `office-output-name`, `office-status`). A new Office-like tool is just a template with different data attributes.
 - `common.js` helpers:
-  - Page setup: `setupDropzone`, `statusSetter` (toggles `.is-error`), `uploadProgress` (also holds a "Cancelar" button wired by `postForm` through `progress.setCancel`).
+  - Page setup: `setupDropzone`, `statusSetter(element)` -> `setStatus(message, state)` (state `true` = error, `"done"` = finished download shown as the result panel `.status.is-done` and step 3 of the strip, `false` = progress text), `uploadProgress` (also holds a "Cancelar" button wired by `postForm` through `progress.setCancel`; it sits inside the action bar, before the status).
+  - Step strip: `markStep(n)`; a `change` on any file input or a dropzone drop moves to step 2, a `"done"` status to step 3.
+  - Reordering: `dragHandle(label)` (44 px `button.drag-handle`) and `reorderableList(list, { move, canMove, describe })` for lists of `li[data-index]` (merge, images, workflow files and steps): pointer drag from the handle (mouse and touch) with a `.drop-line`, ArrowUp/ArrowDown on the handle, focus follows the item and a `.visually-hidden` live region announces the position. Rows no longer use HTML5 `draggable`. Move/remove buttons are at least 44 px.
   - Requests and downloads: `postForm(url, formData, progress)` (sends a random `X-Job-Id`; Cancelar calls `/api/jobs/{id}/cancel` and aborts the XHR, rejecting with "Trabajo cancelado."), `errorMessage(response, fallback)`, `downloadName(response)` (prefers `filename*=UTF-8''...` over the ASCII `filename="..."` fallback, survives a malformed encoding), `downloadBlob`.
   - Checks and formatting: `withPdfExtension`, `isPdf`, `isImage`, `escapeHtml`.
 - Results download as a blob through a temporary `<a download>`. split.js and pdf-to-images.js check `blob.type === "application/zip"` because a single result comes back as a plain PDF or image.
@@ -40,7 +43,8 @@ paths:
 - workflow.js chains tools client-side: it posts each step's result Blob as `file` to the existing `/api/*` endpoints with `postForm()`, downloads only the final result and offers the last good intermediate if a step fails (cleared when files or steps change).
   - `MERGE_STEP` runs first when there are several PDFs.
   - `STEP_DEFINITIONS` entries are data-driven: `id`, `title`, `endpoint`, `working`, `failed`, optional `position`, `build(container)` -> `fill(formData)` (returns an error string or `""`), optional `afterResponse`, optional `clear`.
-  - Positions: repair `start` (a damaged file is fixed before anything reads it), ocr `first` (before anything that adds text, which OCR would skip), numbers / watermark / compress normal, metadata `late` (after compress/OCR rewrite producer and dates), pdfa `archive` (any later change breaks PDF/A), protect `last`. `POSITION_RANK` sorts them; `canMove` / `moveStep` only swap steps within the same group, and `addStep` puts a new step at the end of its group.
+  - Steps reorder through `reorderableList`; `canMove(from, to)` allows only the same position group (steps stay sorted by group) and `moveStepTo(from, to)` moves; `renderSteps` sets `data-index` on user steps (the fixed merge step has none).
+  - Positions: repair `start` (a damaged file is fixed before anything reads it), ocr `first` (before anything that adds text, which OCR would skip), numbers / watermark / compress normal, metadata `late` (after compress/OCR rewrite producer and dates), pdfa `archive` (any later change breaks PDF/A), protect `last`. `POSITION_RANK` sorts them, and `addStep` puts a new step at the end of its group.
   - Helpers: `field`, `selectControl`, `numberControl`, `textControl`, `checkControl`.
 - CSP (set by the server): no inline `<script>` or handlers, no external hosts, images only from self or `blob:`. Fonts are local (`static/fonts`).
 - sign.js sends placements as fractions of the page preview (pdfium renders it rotated and cropped, so it matches). The pad and the "Firma actual" preview use `color-scheme: light; background: Canvas` so dark ink stays visible in dark mode; `touch-action: none` on the pad and boxes stops page scroll while drawing or dragging.

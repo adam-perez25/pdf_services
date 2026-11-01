@@ -38,9 +38,10 @@ firmar, Extraer texto e imágenes, Flujo de trabajo):
    página por cada una y de un GIF o WEBP animado se usa el primer fotograma.
 4. **Word a PDF:** convierte archivos `.doc` y `.docx` con LibreOffice.
 5. **Organizar páginas:** muestra una vista previa de cada página y permite
-   girarlas, eliminarlas y reordenarlas (con los botones o arrastrándolas,
-   también en pantallas táctiles manteniendo pulsada la página) antes de
-   descargar el PDF resultante. Al pulsar una página se abre una vista
+   girarlas, eliminarlas y reordenarlas (con los botones, arrastrándolas por
+   su asa o, en pantallas táctiles, manteniendo pulsada la página; con el
+   teclado, enfocando el asa y usando las flechas) antes de descargar el PDF
+   resultante. Al pulsar una página se abre una vista
    ampliada en alta resolución.
 6. **Comprimir PDF:** reduce el tamaño bajando la resolución de las imágenes
    con Ghostscript, ideal para documentos escaneados. Tres niveles: máxima
@@ -416,6 +417,17 @@ primera herramienta encontrada y Esc lo vacía). Cada herramienta muestra a la
 izquierda la lista de todas, agrupadas, para cambiar de una a otra sin volver
 al inicio; en el móvil esa lista se abre con el botón «Herramientas». La
 lista sale de un único archivo, `static/tools.js`.
+
+Todas las herramientas comparten la misma disposición: una franja con los
+pasos («1 Elige el archivo, 2 Ajusta, 3 Descarga») que avanza sola, el archivo
+a la izquierda y las opciones a la derecha, con el botón principal siempre a la
+vista (en el móvil, una columna con el botón fijo abajo). Al terminar, el
+resultado o el error se muestra en un recuadro bajo el botón, junto al botón
+«Cancelar» mientras se trabaja. Las listas que se pueden ordenar (Unir PDF,
+Imágenes a PDF, los archivos y pasos del flujo de trabajo y Organizar páginas)
+tienen un asa (⠿) para arrastrar con el ratón o el dedo, una línea que marca
+dónde quedará el elemento, botones de subir y bajar de al menos 44 px y orden
+con el teclado (enfoca el asa y usa las flechas).
 
 ## API
 
