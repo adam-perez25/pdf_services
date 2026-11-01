@@ -4,8 +4,10 @@ running them with a timeout (or a cancel) that kills the whole process tree.
 Endpoints call these through the module (external_tools.run_tool(...)),
 so tests replace them in one place.
 """
+import glob
 import importlib.util
 import os
+from pathlib import Path
 import shutil
 import signal
 import subprocess
@@ -20,6 +22,24 @@ def find_soffice() -> str | None:
 
 def find_ghostscript() -> str | None:
     return shutil.which("gs") or shutil.which("gswin64c") or shutil.which("gswin32c")
+
+
+def find_srgb_profile() -> Path | None:
+    """Ghostscript's bundled sRGB ICC profile, which PDF/A needs as output intent.
+
+    Debian puts it under /usr/share/ghostscript/<version>/iccprofiles (and
+    links /usr/share/color/icc/ghostscript); the Windows installer next to bin/.
+    """
+    candidates = glob.glob("/usr/share/ghostscript/*/iccprofiles/default_rgb.icc")
+    candidates.append("/usr/share/color/icc/ghostscript/default_rgb.icc")
+    ghostscript = find_ghostscript()
+    if ghostscript:
+        install = Path(ghostscript).resolve().parent.parent
+        candidates += [str(install / "iccprofiles" / "default_rgb.icc"), str(install / "lib" / "default_rgb.icc")]
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return Path(candidate)
+    return None
 
 
 def find_tesseract() -> str | None:

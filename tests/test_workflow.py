@@ -162,11 +162,13 @@ def test_step_order_is_enforced_by_position():
     positions = step_positions()
 
     assert positions == {
+        "repair": "start",
         "ocr": "first",
         "numbers": None,
         "watermark": None,
         "metadata": "late",
         "compress": None,
+        "pdfa": "archive",
         "protect": "last",
     }
     code = WORKFLOW_JS.read_text(encoding="utf-8")

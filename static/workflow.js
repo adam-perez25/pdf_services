@@ -88,9 +88,10 @@ function formatSize(bytes) {
 //   id, title          unique key and the label shown to the user
 //   endpoint           the existing /api endpoint that does the work
 //   working, failed    status text while running and the fallback error
-//   position           where the step may go: "first" (right after the forced
-//                      merge), "late" (after the normal steps), "last" (at the
-//                      very end) or nothing (a normal step, any order). Steps
+//   position           where the step may go: "start" (right after the forced
+//                      merge), "first" (after that), "late" (after the normal
+//                      steps), "archive" (after those), "last" (at the very
+//                      end) or nothing (a normal step, any order). Steps
 //                      are kept sorted by position; the user only reorders
 //                      steps with the same position.
 //   build(container)   adds the option controls to container and returns
@@ -113,6 +114,18 @@ const MERGE_STEP = {
 };
 
 const STEP_DEFINITIONS = [
+    {
+        id: "repair",
+        title: "Reparar PDF",
+        endpoint: "/api/repair",
+        working: "Reparando el PDF...",
+        failed: "No se pudo reparar el PDF.",
+        // A damaged file has to be fixed before any other tool reads it.
+        position: "start",
+        build() {
+            return () => "";
+        },
+    },
     {
         id: "ocr",
         title: "Reconocer texto (OCR)",
@@ -278,6 +291,35 @@ const STEP_DEFINITIONS = [
             const compressed = Number(response.headers.get("X-Compressed-Size"));
             const saved = Math.round((1 - compressed / original) * 100);
             return `${formatSize(original)} → ${formatSize(compressed)} (−${saved} %).`;
+        },
+    },
+    {
+        id: "pdfa",
+        title: "Convertir a PDF/A",
+        endpoint: "/api/pdfa",
+        working: "Convirtiendo a PDF/A... puede tardar un poco en documentos grandes.",
+        failed: "No se pudo convertir el PDF a PDF/A.",
+        // Ghostscript rewrites the whole file and its metadata, and a PDF/A
+        // cannot be modified or encrypted afterwards: it goes after everything
+        // else, just before protect (which would break it).
+        position: "archive",
+        build(container) {
+            const part = selectControl([
+                ["1", "PDF/A-1: la más estricta"],
+                ["2", "PDF/A-2: recomendada"],
+                ["3", "PDF/A-3: admite archivos adjuntos"],
+            ], "2");
+            const hint = document.createElement("p");
+            hint.className = "workflow-step-note";
+            hint.textContent = "Va casi al final: cualquier cambio posterior, y sobre todo proteger con contraseña, deja de ser PDF/A.";
+            container.append(field("Versión de PDF/A", part), hint);
+            return (formData) => {
+                formData.append("part", part.value);
+                return "";
+            };
+        },
+        afterResponse(response) {
+            return `PDF/A-${response.headers.get("X-PDFA-Part") || "2"}.`;
         },
     },
     {
@@ -477,7 +519,7 @@ function setStepState(step, state, note = "") {
 }
 
 // Order of the position groups; steps without a position are "normal".
-const POSITION_RANK = { first: 0, normal: 1, late: 2, last: 3 };
+const POSITION_RANK = { start: 0, first: 1, normal: 2, late: 3, archive: 4, last: 5 };
 
 function rank(definition) {
     return POSITION_RANK[definition.position || "normal"];

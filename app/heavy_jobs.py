@@ -54,6 +54,8 @@ HEAVY_JOB_ESTIMATES = {
     "pdf-to-images": (0.5, 400),
     "extract-text": (0.5, 0),  # pdfium, page by page, written to disk
     "compress": (0.5, 300),  # Ghostscript
+    "pdfa": (0.5, 300),  # Ghostscript, with color conversion
+    "repair": (0.5, 300),  # Ghostscript
     "ocr": (0.5, 600),  # ocrmypdf + OCR_JOBS Tesseract workers
     "office": (3.0, 500),  # LibreOffice; documents grow a lot once loaded
 }
