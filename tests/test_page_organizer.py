@@ -9,6 +9,7 @@ import pytest
 
 import app.main as main
 import app.config as config
+import app.documents as documents
 from conftest import page_layout
 
 
@@ -123,7 +124,7 @@ def test_expired_documents_are_swept(client, sample_pdf, documents_dir):
     old = time.time() - config.DOCUMENT_TTL_SECONDS - 1
     os.utime(documents_dir / f"{old_id}.pdf", (old, old))
 
-    main.remove_expired_documents()
+    documents.remove_expired_documents()
 
     assert not (documents_dir / f"{old_id}.pdf").exists()
     assert (documents_dir / f"{recent_id}.pdf").exists()

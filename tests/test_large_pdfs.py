@@ -15,6 +15,9 @@ import pytest
 
 import app.main as main
 import app.config as config
+import app.documents as documents
+import app.external_tools as external_tools
+import app.uploads as uploads
 
 
 PAGE_COUNT = 1500
@@ -198,20 +201,20 @@ def test_sweeper_skips_files_of_running_jobs(documents_dir):
         path.write_bytes(b"%PDF")
         make_old(path)
 
-    with main.protect_from_sweeper(running):
-        main.remove_expired_documents()
+    with documents.protect_from_sweeper(running):
+        documents.remove_expired_documents()
         assert running.exists()
         assert not abandoned.exists()
 
     # Once the job ends the file gets a fresh mtime for its download, and is
     # swept normally if it is then left behind.
     assert running.stat().st_mtime > time.time() - 60
-    main.remove_expired_documents()
+    documents.remove_expired_documents()
     assert running.exists()
     make_old(running)
-    main.remove_expired_documents()
+    documents.remove_expired_documents()
     assert not running.exists()
-    assert main.ACTIVE_JOB_FILES == set()
+    assert documents.ACTIVE_JOB_FILES == set()
 
 
 def test_slow_compression_survives_a_sweep(client, large_pdf, documents_dir, monkeypatch):
@@ -226,12 +229,12 @@ def test_slow_compression_survives_a_sweep(client, large_pdf, documents_dir, mon
         output.write_bytes(source.read_bytes()[: len(large_pdf) // 2])
         for path in documents_dir.iterdir():
             make_old(path)
-        main.remove_expired_documents()
+        documents.remove_expired_documents()
         calls["left"] = sorted(path.name for path in documents_dir.iterdir())
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr(main, "find_ghostscript", lambda: "gs")
-    monkeypatch.setattr(main, "run_tool", slow_tool)
+    monkeypatch.setattr(external_tools, "find_ghostscript", lambda: "gs")
+    monkeypatch.setattr(external_tools, "run_tool", slow_tool)
 
     response = client.post("/api/compress", files=upload(large_pdf))
 
@@ -243,7 +246,7 @@ def test_slow_compression_survives_a_sweep(client, large_pdf, documents_dir, mon
 
 
 def test_slow_split_zip_survives_a_sweep(client, large_pdf, documents_dir, monkeypatch):
-    real_write = main.write_pdf_to_file
+    real_write = uploads.write_pdf_to_file
 
     def write_then_sweep(writer):
         # The ZIP being filled ages past the TTL while parts are still added;
@@ -252,14 +255,14 @@ def test_slow_split_zip_survives_a_sweep(client, large_pdf, documents_dir, monke
         for leftover in documents_dir.iterdir():
             if leftover != path:
                 make_old(leftover)
-        main.remove_expired_documents()
+        documents.remove_expired_documents()
         # (On Windows an open file cannot be deleted anyway, so also check
         # that the ZIP is registered as in use.)
         zips = [p for p in documents_dir.iterdir() if p.suffix == ".zip"]
-        assert len(zips) == 1 and zips[0] in main.ACTIVE_JOB_FILES
+        assert len(zips) == 1 and zips[0] in documents.ACTIVE_JOB_FILES
         return path
 
-    monkeypatch.setattr(main, "write_pdf_to_file", write_then_sweep)
+    monkeypatch.setattr(uploads, "write_pdf_to_file", write_then_sweep)
     response = client.post(
         "/api/split-zip",
         files=upload(large_pdf),

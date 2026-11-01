@@ -7,6 +7,8 @@ import pytest
 
 import app.main as main
 import app.config as config
+import app.errors as errors
+import app.pdf_helpers as pdf_helpers
 from conftest import make_pdf
 
 
@@ -270,12 +272,12 @@ def test_overlong_page_list_is_rejected_quickly(client, documents_dir):
     response = convert(client, make_pdf(3), pages=",".join(["1-3"] * 1000))
 
     assert response.status_code == 400
-    assert str(main.PAGE_SELECTION_MAX_LENGTH) in response.json()["detail"]
+    assert str(pdf_helpers.PAGE_SELECTION_MAX_LENGTH) in response.json()["detail"]
     assert list(documents_dir.iterdir()) == []
 
 
 def test_non_finite_pixel_total_is_rejected():
-    with pytest.raises(main.HTTPException) as error:
+    with pytest.raises(errors.HTTPException) as error:
         main.check_pdf_to_images_budget(float("nan"), 1, 150, "png")
     assert error.value.status_code == 400
 

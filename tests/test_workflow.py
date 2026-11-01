@@ -6,13 +6,14 @@ from pypdf import PdfReader, PdfWriter
 import pytest
 
 import app.main as main
+import app.external_tools as external_tools
 from conftest import make_pdf
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW_JS = ROOT / "static" / "workflow.js"
 WORKFLOW_HTML = ROOT / "templates" / "workflow.html"
 
-needs_ghostscript = pytest.mark.skipif(main.find_ghostscript() is None, reason="Ghostscript is not installed")
+needs_ghostscript = pytest.mark.skipif(external_tools.find_ghostscript() is None, reason="Ghostscript is not installed")
 
 
 def make_pdf_with_metadata(page_count: int) -> bytes:
@@ -185,7 +186,7 @@ def test_metadata_removed_last_survives_compress_and_ocr(client):
     )
     assert merge.status_code == 200
     result = merge.content
-    if main.ocr_available():
+    if external_tools.ocr_available():
         result = run_step(client, "/api/ocr", result, language="spa", output_name=name)
     result = run_step(
         client, "/api/stamp", result,

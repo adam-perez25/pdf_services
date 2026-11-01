@@ -1,49 +1,74 @@
-from collections import deque
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager
 import errno
-import gc
-import importlib.util
 from io import BytesIO
 import json
-import logging
 import math
 import mimetypes
 import os
 from pathlib import Path
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import unicodedata
-from urllib.parse import quote
 import uuid
-import warnings
 from xml.sax.saxutils import escape as xml_escape
 import zipfile
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, ImageSequence, UnidentifiedImageError
-import pypdfium2
 from pypdf import PageObject, PdfReader, PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, FloatObject, NameObject, TextStringObject
+import pypdfium2
 from starlette.background import BackgroundTask
 
-from app import config
+from app import config, external_tools, heavy_jobs
+from app.documents import (
+    DOCUMENT_ID_PATTERN,
+    document_gone,
+    get_document_path,
+    open_pdfium_document,
+    protect_from_sweeper,
+    remove_expired_documents,
+    start_document_sweeper,
+)
+from app.errors import encrypted_pdf, logger, processing_error
+from app.heavy_jobs import decoded_image_mb, job_estimate_mb
+from app.image_helpers import ALLOWED_IMAGE_FORMATS, IMAGE_MAX_PIXELS, IMAGE_TOO_BIG_MESSAGE, image_pixels
+from app.pdf_helpers import (
+    PDFIUM_LOCK,
+    check_page_list_total,
+    check_page_selection_length,
+    open_pdf_reader,
+    open_pdfium_checked,
+    parse_page_ranges,
+    parse_user_json,
+    pdf_number,
+    selected_page_numbers,
+    strip_before_pdf_header,
+    visible_page_box,
+)
+from app.uploads import (
+    check_upload_sizes,
+    clean_base_name,
+    clean_output_name,
+    content_disposition,
+    file_download,
+    new_job_paths,
+    unique_pdf_names,
+    upload_size,
+    write_pdf_to_file,
+)
 
 
-DOCUMENT_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
-PDFIUM_LOCK = threading.Lock()
 THUMBNAIL_WIDTH = 300
 MIN_RENDER_WIDTH = 100
 MAX_RENDER_WIDTH = 2000
-logger = logging.getLogger("uvicorn.error")
 
 
 @asynccontextmanager
@@ -308,420 +333,17 @@ def health():
         content={
             "status": "ok" if storage_ok else "error",
             "storage": storage_ok,
-            "libreoffice": find_soffice() is not None,
-            "ghostscript": find_ghostscript() is not None,
-            "ocr": ocr_available(),
-            "heavy_jobs": HEAVY_JOBS.status(),
+            "libreoffice": external_tools.find_soffice() is not None,
+            "ghostscript": external_tools.find_ghostscript() is not None,
+            "ocr": external_tools.ocr_available(),
+            "heavy_jobs": heavy_jobs.HEAVY_JOBS.status(),
         },
     )
-
-
-def find_soffice() -> str | None:
-    return shutil.which("soffice") or shutil.which("soffice.exe")
-
-
-def find_ghostscript() -> str | None:
-    return shutil.which("gs") or shutil.which("gswin64c") or shutil.which("gswin32c")
-
-
-def run_tool(command: list[str], timeout: float, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
-    """Run an external tool, and on timeout kill it with every process it started.
-
-    soffice is only a launcher: the conversion runs in a soffice.bin child, which
-    subprocess.run's timeout would leave running after killing the launcher.
-    On POSIX the tool gets its own process group, so the whole group is killed.
-    """
-    process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        start_new_session=os.name == "posix",
-        env=env,
-    )
-    try:
-        stdout, stderr = process.communicate(timeout=timeout)
-    except BaseException:
-        kill_process_tree(process)
-        process.communicate()
-        raise
-    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
-
-
-def kill_process_tree(process: subprocess.Popen) -> None:
-    if os.name == "posix":
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    else:
-        subprocess.run(
-            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
-            capture_output=True,
-            check=False,
-        )
-        process.kill()
 
 
 def render_page(template_name: str) -> HTMLResponse:
     html = (config.BASE_DIR / "templates" / template_name).read_text(encoding="utf-8")
     return HTMLResponse(html)
-
-
-# Longest download name kept, not counting the extension, so a huge
-# output_name cannot make a huge Content-Disposition header.
-MAX_OUTPUT_NAME_LENGTH = 150
-
-
-def clean_base_name(output_name: str, default: str) -> str:
-    name = Path(output_name.strip()).name
-    # Letters and digits of any alphabet (accents, ñ) are kept; anything else
-    # (quotes, control characters, <>:"/\|?* that Windows rejects) becomes "_".
-    name = re.sub(r"[^\w. -]", "_", unicodedata.normalize("NFC", name)).strip(" .")
-    if not name:
-        name = default
-    stem, extension = os.path.splitext(name)
-    if len(extension) > 10:  # not a real extension, part of the name
-        stem, extension = name, ""
-    if len(stem) > MAX_OUTPUT_NAME_LENGTH:
-        name = (stem[:MAX_OUTPUT_NAME_LENGTH].strip(" .") or default) + extension
-    return name
-
-
-def clean_output_name(output_name: str) -> str:
-    name = clean_base_name(output_name, "merged")
-    if not name.lower().endswith(".pdf"):
-        name += ".pdf"
-    return name
-
-
-def upload_size(file: UploadFile) -> int:
-    # The upload is already spooled (to disk when big), so seeking to the end
-    # measures it without reading it into memory.
-    position = file.file.tell()
-    file.file.seek(0, os.SEEK_END)
-    size = file.file.tell()
-    file.file.seek(position)
-    return size
-
-
-def check_upload_sizes(files: list[UploadFile]) -> None:
-    """Reject the request with 413 if a file or all of them together are too big."""
-    megabyte = 1024 * 1024
-    sizes = [upload_size(file) for file in files]
-    if any(size > config.MAX_UPLOAD_MB * megabyte for size in sizes):
-        detail = f"Cada archivo puede ocupar como máximo {config.MAX_UPLOAD_MB} MB."
-    elif sum(sizes) > config.MAX_TOTAL_UPLOAD_MB * megabyte:
-        detail = f"Los archivos no pueden ocupar más de {config.MAX_TOTAL_UPLOAD_MB} MB en total."
-    else:
-        return
-    for file in files:
-        file.file.close()
-    raise HTTPException(status_code=413, detail=detail)
-
-
-def processing_error(message: str, error: Exception) -> HTTPException:
-    # The raw error can expose internals (paths, library messages), so users
-    # only get the Spanish message and the details go to the server log.
-    logger.warning(message, exc_info=error)
-    return HTTPException(status_code=400, detail=message)
-
-
-ENCRYPTED_PDF_MESSAGE = (
-    "Este PDF está protegido con contraseña. Desbloquéalo antes de usar esta herramienta."
-)
-
-
-def encrypted_pdf() -> HTTPException:
-    return HTTPException(status_code=400, detail=ENCRYPTED_PDF_MESSAGE)
-
-
-def open_pdf_reader(source) -> PdfReader:
-    """Open a PDF with pypdf, rejecting it if it needs a password to be read.
-
-    PDFs with only an owner password (empty user password) open normally.
-    """
-    reader = PdfReader(source)
-    if reader.is_encrypted and not reader.decrypt(""):
-        raise encrypted_pdf()
-    return reader
-
-
-def open_pdfium_checked(path: Path) -> pypdfium2.PdfDocument:
-    """Open a PDF with pdfium, turning a password error into a clear 400."""
-    try:
-        return open_pdfium_document(path)
-    except pypdfium2.PdfiumError as error:
-        if getattr(error, "err_code", None) == pypdfium2.raw.FPDF_ERR_PASSWORD:
-            raise encrypted_pdf() from error
-        raise
-
-
-# Work files of requests that are still being processed (a long compression,
-# a big ZIP). The sweeper skips them, so a job that runs longer than
-# DOCUMENT_TTL_SECONDS does not lose its files halfway.
-ACTIVE_JOB_FILES: set[Path] = set()
-ACTIVE_JOB_LOCK = threading.Lock()
-
-
-@contextmanager
-def protect_from_sweeper(*paths: Path):
-    with ACTIVE_JOB_LOCK:
-        ACTIVE_JOB_FILES.update(paths)
-    try:
-        yield
-    finally:
-        with ACTIVE_JOB_LOCK:
-            ACTIVE_JOB_FILES.difference_update(paths)
-        # The download starts right after; a fresh mtime gives it a full TTL
-        # before the sweeper may remove a file whose cleanup never ran.
-        for path in paths:
-            try:
-                os.utime(path)
-            except FileNotFoundError:
-                pass
-
-
-def new_job_paths(*suffixes: str) -> list[Path]:
-    config.DOCUMENTS_DIR.mkdir(exist_ok=True)
-    job_id = uuid.uuid4().hex
-    return [config.DOCUMENTS_DIR / f"{job_id}{suffix}" for suffix in suffixes]
-
-
-def write_pdf_to_file(writer: PdfWriter) -> Path:
-    """Write a result PDF to a work file instead of memory.
-
-    Kept in memory, a big result would exist two or three times at once (the
-    buffer, its copy and the response body); on disk it is streamed out.
-    """
-    (path,) = new_job_paths(".out.pdf")
-    try:
-        with protect_from_sweeper(path), path.open("wb") as destination:
-            writer.write(destination)
-    except BaseException:
-        path.unlink(missing_ok=True)
-        raise
-    return path
-
-
-def content_disposition(filename: str) -> str:
-    """Content-Disposition for a download name (already cleaned by clean_base_name).
-
-    Plain ASCII names go as filename="..."; others also get an ASCII fallback
-    plus filename*=UTF-8''... (RFC 6266), which browsers prefer, so accents
-    and ñ survive. Quotes, backslashes and control characters never reach the
-    header, so it cannot be broken or extended.
-    """
-    # "año" -> "ano": accents are dropped, other non-ASCII letters become "_".
-    fallback = "".join(
-        char for char in unicodedata.normalize("NFKD", filename) if unicodedata.category(char) != "Mn"
-    )
-    fallback = re.sub(r'[^\x20-\x7e]|["\\]', "_", fallback).strip() or "descarga"
-    if fallback == filename:
-        return f'attachment; filename="{filename}"'
-    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(filename, safe='')}"
-
-
-def file_download(path: Path, filename: str, media_type: str = "application/pdf", headers: dict | None = None,
-                  background: BackgroundTask | None = None) -> FileResponse:
-    """Send a work file as an attachment and delete it once it has been sent
-    (or run `background` instead, when other files must go too)."""
-    return FileResponse(
-        path,
-        media_type=media_type,
-        headers={**(headers or {}), "Content-Disposition": content_disposition(filename)},
-        background=background or BackgroundTask(path.unlink, missing_ok=True),
-    )
-
-
-# --- Heavy job limiter -------------------------------------------------------
-# Two jobs on 500 MB files at once could exceed the container's memory
-# (mem_limit 3g), so each job reserves an estimate of the memory it needs from
-# a shared budget and waits in line while the budget is used up. Small jobs
-# (the usual few-MB PDFs) skip the line entirely, so they never wait.
-# Jobs estimated below this many MB never wait and reserve nothing.
-HEAVY_JOB_MIN_MB = 100
-# Jobs on files smaller than this (in total) never wait either, whatever the
-# tool: the fixed part of an estimate (Ghostscript, LibreOffice...) is a
-# worst case for big documents, and the usual few-MB PDFs must not queue.
-HEAVY_JOB_SMALL_FILES_MB = 50
-HEAVY_JOB_RETRY_AFTER_SECONDS = 60
-HEAVY_JOB_BUSY_MESSAGE = (
-    "El servidor está ocupado con otros documentos grandes. "
-    "Inténtalo de nuevo en unos minutos."
-)
-# Estimated memory per tool: (factor x upload size, fixed MB). From the
-# measurements with a 200 MB / 1000-page PDF: merging 2 copies used ~500 MB
-# (1.25x), split/organize/stamp/metadata ~300 MB (1.5x), protect ~650 MB
-# (3.25x). Ghostscript, Tesseract and LibreOffice run as separate processes
-# whose memory depends little on the file size, hence the fixed part.
-# pdf-to-images renders one page at a time, bounded by MAX_IMAGE_PIXELS
-# (40 Mpx x 4 bytes = 160 MB per bitmap, plus the RGB copy and the encoder).
-HEAVY_JOB_ESTIMATES = {
-    "merge": (1.3, 0),
-    "split": (1.5, 0),
-    "edit": (1.5, 0),  # organizer save, edit-pages
-    "stamp": (1.5, 0),
-    "metadata": (1.5, 0),
-    "protect": (3.5, 0),
-    "unlock": (3.5, 0),
-    "sign": (1.5, 100),
-    "images-to-pdf": (1.5, 300),  # one decoded image at a time
-    "pdf-to-images": (0.5, 400),
-    "extract-text": (0.5, 0),  # pdfium, page by page, written to disk
-    "compress": (0.5, 300),  # Ghostscript
-    "ocr": (0.5, 600),  # ocrmypdf + OCR_JOBS Tesseract workers
-    "office": (3.0, 500),  # LibreOffice; documents grow a lot once loaded
-}
-
-
-def job_estimate_mb(tool: str, *sizes: int, minimum_mb: int = 0) -> int:
-    """Estimated memory in MB of running `tool` on files of these byte sizes.
-
-    Small files give 0, so heavy_job lets them through without waiting.
-    `minimum_mb` is a floor that applies whatever the file sizes: a tiny
-    compressed image can decode to hundreds of MB (see decoded_image_mb).
-    """
-    if sum(sizes) < HEAVY_JOB_SMALL_FILES_MB * 1024 * 1024:
-        return minimum_mb
-    factor, fixed = HEAVY_JOB_ESTIMATES[tool]
-    return max(math.ceil(factor * sum(sizes) / (1024 * 1024) + fixed), minimum_mb)
-
-
-# Memory per pixel while an image is decoded and converted: the decoded image
-# (up to 4 bytes per pixel, RGBA) plus its RGB/RGBA copy.
-DECODED_BYTES_PER_PIXEL = 8
-
-
-def decoded_image_mb(pixels: int) -> int:
-    return math.ceil(pixels * DECODED_BYTES_PER_PIXEL / (1024 * 1024))
-
-
-class HeavyJobLimiter:
-    """A memory budget shared by the running jobs, handed out in arrival order.
-
-    A job runs when it is first in line and its estimate fits in what is left
-    of the budget, or when nothing else is running (so a job bigger than the
-    whole budget still runs, alone). Strict first-come order means a waiting
-    big job is never overtaken by later ones, so it cannot starve.
-    """
-
-    def __init__(self):
-        self.condition = threading.Condition()
-        self.queue: deque = deque()
-        self.reserved_mb = 0
-        self.running = 0
-
-    def acquire(self, megabytes: int, budget: int, wait_seconds: float, max_waiting: int | None = None) -> bool:
-        deadline = time.monotonic() + wait_seconds
-        ticket = object()
-        with self.condition:
-            if max_waiting is not None and len(self.queue) >= max_waiting:
-                return False
-            self.queue.append(ticket)
-            try:
-                while not (
-                    self.queue[0] is ticket
-                    and (self.running == 0 or self.reserved_mb + megabytes <= budget)
-                ):
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        return False
-                    self.condition.wait(remaining)
-                self.reserved_mb += megabytes
-                self.running += 1
-                return True
-            finally:
-                # Whether it got in or gave up, the next one in line may now go.
-                self.queue.remove(ticket)
-                self.condition.notify_all()
-
-    def release(self, megabytes: int) -> None:
-        with self.condition:
-            self.reserved_mb -= megabytes
-            self.running -= 1
-            self.condition.notify_all()
-
-    def status(self) -> dict:
-        with self.condition:
-            return {"running": self.running, "reserved_mb": self.reserved_mb, "waiting": len(self.queue)}
-
-
-HEAVY_JOBS = HeavyJobLimiter()
-
-
-@contextmanager
-def heavy_job(megabytes: int, uploads: list[UploadFile] = ()):
-    """Hold a share of the memory budget while a job runs.
-
-    Use it around the processing only, after the cheap validations, so bad
-    requests fail at once. If the turn does not come within
-    HEAVY_JOB_WAIT_SECONDS it answers 503 with Retry-After (closing `uploads`,
-    like check_upload_sizes). The share is released even if the job fails.
-    """
-    if megabytes < HEAVY_JOB_MIN_MB:
-        yield
-        return
-    if not HEAVY_JOBS.acquire(megabytes, config.HEAVY_JOB_BUDGET_MB, config.HEAVY_JOB_WAIT_SECONDS, config.HEAVY_JOB_MAX_WAITING):
-        for upload in uploads:
-            upload.file.close()
-        raise HTTPException(
-            status_code=503,
-            detail=HEAVY_JOB_BUSY_MESSAGE,
-            headers={"Retry-After": str(HEAVY_JOB_RETRY_AFTER_SECONDS)},
-        )
-    try:
-        yield
-    finally:
-        HEAVY_JOBS.release(megabytes)
-        release_free_memory()
-
-
-def _load_malloc_trim():
-    # glibc only (the Docker image): musl and Windows have no malloc_trim.
-    if not sys.platform.startswith("linux"):
-        return None
-    try:
-        import ctypes
-
-        return ctypes.CDLL("libc.so.6").malloc_trim
-    except (OSError, AttributeError):
-        return None
-
-
-MALLOC_TRIM = _load_malloc_trim()
-# The job's objects (readers, writers) are only freed once the endpoint has
-# returned, a moment after heavy_job ends, so the trim runs a little later.
-MALLOC_TRIM_DELAY_SECONDS = 2.0
-_trim_lock = threading.Lock()
-_trim_timer: threading.Timer | None = None
-
-
-def _trim_now() -> None:
-    try:
-        gc.collect()
-        MALLOC_TRIM(0)
-    except Exception:
-        logger.debug("malloc_trim failed", exc_info=True)
-
-
-def release_free_memory() -> None:
-    """Give the memory a big job freed back to the system.
-
-    glibc keeps freed heap memory for reuse, so after a few big jobs the idle
-    container stays near its peak size; malloc_trim(0) returns the free pages.
-    Called only after big jobs (heavy_job reservations); several jobs ending
-    close together share one trim. A no-op where malloc_trim does not exist.
-    """
-    global _trim_timer
-    if MALLOC_TRIM is None:
-        return
-    with _trim_lock:
-        if _trim_timer is not None and _trim_timer.is_alive():
-            return  # a trim is already due; it will cover this job too
-        _trim_timer = threading.Timer(MALLOC_TRIM_DELAY_SECONDS, _trim_now)
-        _trim_timer.daemon = True
-        _trim_timer.start()
 
 
 # The file-processing endpoints are plain functions, not async: FastAPI runs
@@ -744,7 +366,7 @@ def merge_pdfs(
                     status_code=400,
                     detail="Todos los archivos deben tener extensión PDF.",
                 )
-        with heavy_job(job_estimate_mb("merge", *map(upload_size, files))):
+        with heavy_jobs.heavy_job(job_estimate_mb("merge", *map(upload_size, files))):
             for file in files:
                 writer.append(open_pdf_reader(file.file))
 
@@ -792,7 +414,7 @@ def split_pdf(
     check_upload_sizes([file])
 
     try:
-        with heavy_job(job_estimate_mb("split", upload_size(file))):
+        with heavy_jobs.heavy_job(job_estimate_mb("split", upload_size(file))):
             reader = open_pdf_reader(file.file)
             page_count = len(reader.pages)
             # Only a missing end_page means "to the last page"; 0 is an error.
@@ -820,60 +442,7 @@ def split_pdf(
     return file_download(output_path, clean_output_name(output_name))
 
 
-def parse_page_ranges(value: str, page_count: int) -> list[tuple[int, int]]:
-    ranges = []
-    for part in filter(None, (part.strip() for part in value.split(","))):
-        match = re.fullmatch(r"(\d+)(?:\s*-\s*(\d+))?", part)
-        if not match:
-            raise HTTPException(status_code=400, detail=f"Rango inválido: {part}")
-        start = int(match.group(1))
-        end = int(match.group(2) or start)
-        if end < start:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Rango inválido: {part} (el inicio no puede ser mayor que el final).",
-            )
-        if start < 1 or end > page_count:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Los rangos deben estar entre 1 y {page_count}.",
-            )
-        ranges.append((start, end))
-    if not ranges:
-        raise HTTPException(status_code=400, detail="Escribe al menos un rango de páginas.")
-    return ranges
-
-
-# Page lists that may repeat pages (extract-text ranges, split-zip parts, the
-# organizer's layout) are capped, so "1-2000,1-2000,..." cannot turn a small
-# request into millions of pages of work: at most PAGE_LIST_FACTOR times the
-# document's pages in total, but never less than PAGE_LIST_MIN_LIMIT (so a
-# 1-page document can still be repeated a few dozen times).
-PAGE_LIST_FACTOR = 10
-PAGE_LIST_MIN_LIMIT = 100
 SPLIT_MAX_RANGES = 500
-
-
-def page_list_limit(page_count: int) -> int:
-    return max(PAGE_LIST_FACTOR * page_count, PAGE_LIST_MIN_LIMIT)
-
-
-def check_page_list_total(total: int, page_count: int) -> None:
-    limit = page_list_limit(page_count)
-    if total > limit:
-        raise HTTPException(
-            status_code=400,
-            detail=f"La selección suma {total} páginas; el máximo para este PDF es {limit}.",
-        )
-
-
-def parse_user_json(value: str, message: str):
-    """json.loads for a form field: bad JSON, and JSON nested so deeply that
-    the parser hits the recursion limit, both answer 400 with `message`."""
-    try:
-        return json.loads(value)
-    except (ValueError, RecursionError) as error:
-        raise HTTPException(status_code=400, detail=message) from error
 
 
 def parse_part_names(value: str, count: int) -> list[str | None]:
@@ -892,22 +461,6 @@ def parse_part_names(value: str, count: int) -> list[str | None]:
     ):
         raise HTTPException(status_code=400, detail=message)
     return names
-
-
-def unique_pdf_names(names: list[str], defaults: list[str] | None = None) -> list[str]:
-    # Two parts with the same name would overwrite each other inside the ZIP.
-    # An empty (or dots-only) name falls back to its entry in defaults.
-    seen: dict[str, int] = {}
-    unique = []
-    for index, name in enumerate(names):
-        default = defaults[index] if defaults else "merged"
-        stem = clean_base_name(name, default)
-        if stem.lower().endswith(".pdf"):
-            stem = stem[:-4].strip(" .") or default
-        count = seen.get(stem.lower(), 0) + 1
-        seen[stem.lower()] = count
-        unique.append(f"{stem}.pdf" if count == 1 else f"{stem}-{count}.pdf")
-    return unique
 
 
 @app.post("/api/split-zip")
@@ -931,7 +484,7 @@ def split_pdf_zip(
     check_upload_sizes([file])
 
     try:
-        with heavy_job(job_estimate_mb("split", upload_size(file))):
+        with heavy_jobs.heavy_job(job_estimate_mb("split", upload_size(file))):
             reader = open_pdf_reader(file.file)
             page_count = len(reader.pages)
             base = clean_base_name(base_name, "split-pdf")
@@ -998,72 +551,6 @@ def split_pdf_zip(
         file.file.close()
 
     return file_download(zip_path, clean_base_name(zip_name, "split-pdf.zip"), "application/zip")
-
-
-# The page organizer uploads a PDF once and then refers to it by id, so
-# thumbnails, previews and the final save never upload the file again.
-# Documents live in a temporary folder and are removed after the download, after
-# DOCUMENT_TTL_SECONDS without use, or when the page asks for it.
-def get_document_path(document_id: str) -> Path:
-    if not DOCUMENT_ID_PATTERN.fullmatch(document_id):
-        raise HTTPException(status_code=404, detail="Documento no encontrado.")
-    path = config.DOCUMENTS_DIR / f"{document_id}.pdf"
-    try:
-        # Refresh the last-use time; unlike Path.touch this never recreates a
-        # file that another request has just deleted.
-        os.utime(path)
-    except FileNotFoundError:
-        raise document_gone() from None
-    return path
-
-
-def document_gone() -> HTTPException:
-    # 410 tells the page the upload expired, so it can send the file again.
-    return HTTPException(
-        status_code=410,
-        detail="El documento ha caducado. Vuelve a seleccionar el PDF.",
-    )
-
-
-def open_pdfium_document(path: Path) -> pypdfium2.PdfDocument:
-    try:
-        return pypdfium2.PdfDocument(path)
-    except Exception:
-        if not path.exists():
-            raise document_gone() from None
-        raise
-
-
-def remove_expired_documents(max_age: float | None = None) -> None:
-    # Read at call time, so the configured (or monkeypatched) TTL applies.
-    limit = time.time() - (config.DOCUMENT_TTL_SECONDS if max_age is None else max_age)
-    for path in config.DOCUMENTS_DIR.iterdir():
-        # Holding the lock keeps a job from registering a file between the
-        # check and the unlink.
-        with ACTIVE_JOB_LOCK:
-            if path in ACTIVE_JOB_FILES:
-                continue
-            try:
-                if path.stat().st_mtime < limit:
-                    path.unlink()
-            except OSError:
-                # Already gone, or (on Windows) still open by a request.
-                pass
-
-
-def sweep_documents_forever() -> None:
-    while True:
-        time.sleep(config.DOCUMENT_SWEEP_SECONDS)
-        try:
-            remove_expired_documents()
-        except Exception:
-            logger.exception("No se pudieron limpiar los documentos temporales.")
-
-
-def start_document_sweeper() -> None:
-    # Anything left from a previous run (crash, `docker restart`) is stale.
-    remove_expired_documents(max_age=0)
-    threading.Thread(target=sweep_documents_forever, daemon=True).start()
 
 
 def build_edited_pdf(reader: PdfReader, pages: str) -> bytes:
@@ -1210,7 +697,7 @@ def edit_document(
     try:
         # An open file, not the path: given a path, pypdf reads the whole
         # file into memory first.
-        with protect_from_sweeper(path), heavy_job(job_estimate_mb("edit", path.stat().st_size)), \
+        with protect_from_sweeper(path), heavy_jobs.heavy_job(job_estimate_mb("edit", path.stat().st_size)), \
                 path.open("rb") as source:
             writer = build_edited_writer(open_pdf_reader(source), pages)
             try:
@@ -1249,7 +736,7 @@ def edit_pages(
     check_upload_sizes([file])
 
     try:
-        with heavy_job(job_estimate_mb("edit", upload_size(file))):
+        with heavy_jobs.heavy_job(job_estimate_mb("edit", upload_size(file))):
             writer = build_edited_writer(open_pdf_reader(file.file), pages)
             try:
                 output_path = write_pdf_to_file(writer)
@@ -1268,45 +755,6 @@ def edit_pages(
 A4_SHORT_INCHES = 210 / 25.4
 A4_LONG_INCHES = 297 / 25.4
 MIN_IMAGE_DPI = 72
-# Pillow also opens formats such as EPS, which it renders by running
-# Ghostscript on the upload; only plain raster formats are accepted.
-ALLOWED_IMAGE_FORMATS = ["PNG", "JPEG", "WEBP", "GIF", "BMP", "TIFF"]
-# A 47 KB PNG can declare 13000 x 13000 pixels and decode to ~700 MB, so the
-# size of every uploaded image is read from its header (no decoding) and
-# images over this many pixels are rejected. Pillow's own decompression-bomb
-# limit is set to the same value and its warning is turned into an error, so
-# no Image.open in this service decodes a bigger image either.
-IMAGE_MAX_PIXELS = 100_000_000
-Image.MAX_IMAGE_PIXELS = IMAGE_MAX_PIXELS
-warnings.simplefilter("error", Image.DecompressionBombWarning)
-IMAGE_TOO_BIG_MESSAGE = "La imagen {name} es demasiado grande (máximo {megapixels} millones de píxeles)."
-
-
-def image_pixels(file: UploadFile, formats: list[str], invalid: HTTPException) -> int:
-    """Pixels of an uploaded image read from its header, without decoding it.
-
-    Raises 400 if it is not an image of `formats` (`invalid`) or if it is
-    bigger than IMAGE_MAX_PIXELS. The file is left at position 0.
-    """
-    too_big = HTTPException(
-        status_code=400,
-        detail=IMAGE_TOO_BIG_MESSAGE.format(
-            name=file.filename or "seleccionada", megapixels=IMAGE_MAX_PIXELS // 1_000_000
-        ),
-    )
-    try:
-        file.file.seek(0)
-        with Image.open(file.file, formats=formats) as image:
-            pixels = image.width * image.height
-    except (Image.DecompressionBombWarning, Image.DecompressionBombError) as error:
-        raise too_big from error
-    except (UnidentifiedImageError, OSError, SyntaxError, ValueError) as error:
-        raise invalid from error
-    finally:
-        file.file.seek(0)
-    if pixels > IMAGE_MAX_PIXELS:
-        raise too_big
-    return pixels
 
 
 def a4_resolution(width: int, height: int) -> float:
@@ -1372,7 +820,7 @@ def images_to_pdf(
         estimate = job_estimate_mb(
             "images-to-pdf", *map(upload_size, images), minimum_mb=decoded_image_mb(largest)
         )
-        with heavy_job(estimate):
+        with heavy_jobs.heavy_job(estimate):
             # Pillow applies one resolution to every page, so each image becomes
             # its own one-page PDF at its own dpi and the pages are merged after.
             # Images are decoded one at a time: a decoded photo takes many times
@@ -1454,35 +902,6 @@ def render_scale(width: float, height: float, dpi: int) -> float:
     if pixels > MAX_IMAGE_PIXELS:
         scale *= (MAX_IMAGE_PIXELS / pixels) ** 0.5
     return scale
-
-
-PAGE_SELECTION_MAX_LENGTH = 1000
-
-
-def check_page_selection_length(pages: str) -> None:
-    if len(pages) > PAGE_SELECTION_MAX_LENGTH:
-        raise HTTPException(
-            status_code=400,
-            detail=f"La lista de páginas puede tener como máximo {PAGE_SELECTION_MAX_LENGTH} caracteres.",
-        )
-
-
-def selected_page_numbers(pages: str, page_count: int) -> list[int]:
-    """1-based page numbers in the parse_page_ranges syntax; empty = all.
-
-    A page listed twice is converted once (its image name would repeat).
-    """
-    if not pages.strip():
-        return list(range(1, page_count + 1))
-    # Repeating huge ranges ("1-2000,1-2000,...") would make the expansion
-    # below run for a long time before the duplicates are dropped.
-    check_page_selection_length(pages)
-    numbers = (
-        number
-        for start, end in parse_page_ranges(pages, page_count)
-        for number in range(start, end + 1)
-    )
-    return list(dict.fromkeys(numbers))
 
 
 def format_size_es(size: float) -> str:
@@ -1606,7 +1025,7 @@ def pdf_to_images(
         return output.getvalue()
 
     try:
-        with heavy_job(job_estimate_mb("pdf-to-images", upload_size(file)), [file]), \
+        with heavy_jobs.heavy_job(job_estimate_mb("pdf-to-images", upload_size(file)), [file]), \
                 protect_from_sweeper(input_path, zip_path):
             with input_path.open("wb") as destination:
                 shutil.copyfileobj(file.file, destination)
@@ -1800,7 +1219,7 @@ def convert_office_to_pdf(
     check_upload_sizes([file])
     check_office_content(file, file_extension, kind)
 
-    soffice = find_soffice()
+    soffice = external_tools.find_soffice()
     if not soffice:
         file.file.close()
         raise HTTPException(
@@ -1809,7 +1228,7 @@ def convert_office_to_pdf(
         )
 
     try:
-        with heavy_job(job_estimate_mb("office", upload_size(file))), \
+        with heavy_jobs.heavy_job(job_estimate_mb("office", upload_size(file))), \
                 tempfile.TemporaryDirectory() as temporary_directory:
             temporary_path = Path(temporary_directory)
             input_path = temporary_path / f"source{file_extension}"
@@ -1817,7 +1236,7 @@ def convert_office_to_pdf(
                 shutil.copyfileobj(file.file, destination)
             profile_path = temporary_path / "profile"
             write_libreoffice_profile(profile_path)
-            result = run_tool(
+            result = external_tools.run_tool(
                 [
                     soffice,
                     "--headless",
@@ -1850,47 +1269,12 @@ def convert_office_to_pdf(
     return file_download(result_path, office_output_name(output_name, file.filename))
 
 
-
 # Ghostscript presets: image resolution is what shrinks scanned documents.
 COMPRESSION_LEVELS = {
     "strong": "/screen",  # 72 dpi images, smallest file
     "recommended": "/ebook",  # 150 dpi images, good for reading on screen
     "high": "/printer",  # 300 dpi images, good for printing
 }
-
-
-# pdfium accepts the %PDF- header anywhere in the first 1024 bytes, but
-# Ghostscript runs whatever comes before it as PostScript: a "%!PS" program
-# followed by a valid PDF would pass the pdfium check and then execute.
-PDF_HEADER = b"%PDF-"
-PDF_HEADER_SEARCH_BYTES = 1024
-NOT_A_PDF_MESSAGE = "El archivo no es un PDF válido."
-
-
-def strip_before_pdf_header(path: Path) -> None:
-    """Make the job file start with %PDF- at byte 0 before an external tool reads it.
-
-    Bytes before the header (within PDF_HEADER_SEARCH_BYTES) are removed in
-    place; a file with no header there is rejected with 400.
-    """
-    with path.open("r+b") as handle:
-        offset = handle.read(PDF_HEADER_SEARCH_BYTES).find(PDF_HEADER)
-        if offset < 0:
-            raise HTTPException(status_code=400, detail=NOT_A_PDF_MESSAGE)
-        if offset == 0:
-            return
-        logger.warning("Removed %d bytes before the PDF header of an upload.", offset)
-        read_position, write_position = offset, 0
-        while True:
-            handle.seek(read_position)
-            chunk = handle.read(1024 * 1024)
-            if not chunk:
-                break
-            handle.seek(write_position)
-            handle.write(chunk)
-            read_position += len(chunk)
-            write_position += len(chunk)
-        handle.truncate(write_position)
 
 
 def compression_timeout(page_count: int) -> float:
@@ -1911,7 +1295,7 @@ def compress_pdf(
         raise HTTPException(status_code=400, detail="El nivel de compresión no es válido.")
     check_upload_sizes([file])
 
-    ghostscript = find_ghostscript()
+    ghostscript = external_tools.find_ghostscript()
     if not ghostscript:
         file.file.close()
         raise HTTPException(
@@ -1929,7 +1313,7 @@ def compress_pdf(
 
     try:
         # A big PDF can take longer than DOCUMENT_TTL_SECONDS to compress.
-        with heavy_job(job_estimate_mb("compress", upload_size(file))), \
+        with heavy_jobs.heavy_job(job_estimate_mb("compress", upload_size(file))), \
                 protect_from_sweeper(input_path, output_path):
             with input_path.open("wb") as destination:
                 shutil.copyfileobj(file.file, destination)
@@ -1940,7 +1324,7 @@ def compress_pdf(
                 document = open_pdfium_checked(input_path)
                 page_count = len(document)
                 document.close()
-            result = run_tool(
+            result = external_tools.run_tool(
                 [
                     ghostscript,
                     "-dSAFER",
@@ -2009,14 +1393,6 @@ def check_password(password: str) -> None:
         )
 
 
-def pdf_attachment(content: bytes, filename: str) -> Response:
-    return Response(
-        content=content,
-        media_type="application/pdf",
-        headers={"Content-Disposition": content_disposition(filename)},
-    )
-
-
 @app.post("/api/protect")
 def protect_pdf(
     file: UploadFile = File(...),
@@ -2029,7 +1405,7 @@ def protect_pdf(
         check_upload_sizes([file])
         check_password(password)
         try:
-            with heavy_job(job_estimate_mb("protect", upload_size(file))):
+            with heavy_jobs.heavy_job(job_estimate_mb("protect", upload_size(file))):
                 reader = PdfReader(file.file)
                 if reader.is_encrypted:
                     raise HTTPException(
@@ -2065,7 +1441,7 @@ def unlock_pdf(
         if password:
             check_password(password)
         try:
-            with heavy_job(job_estimate_mb("unlock", upload_size(file))):
+            with heavy_jobs.heavy_job(job_estimate_mb("unlock", upload_size(file))):
                 reader = PdfReader(file.file)
                 if not reader.is_encrypted:
                     raise HTTPException(
@@ -2145,11 +1521,6 @@ def helvetica_width(text: str, size: float) -> float:
     return total * size / 1000
 
 
-def pdf_number(value: float) -> str:
-    text = f"{value:.3f}".rstrip("0").rstrip(".")
-    return "0" if text in {"", "-0"} else text
-
-
 def stamp_text_operator(text: str) -> str:
     # A hex string needs no escaping of parentheses or backslashes.
     return f"<{text.encode('cp1252').hex()}> Tj"
@@ -2166,24 +1537,6 @@ def parse_stamp_number(value: str, label: str, minimum: float, maximum: float, i
             detail=f"{label} debe estar entre {pdf_number(minimum)} y {pdf_number(maximum)}.",
         )
     return number
-
-
-def visible_page_box(page: PageObject) -> tuple[list[str], float, float]:
-    """Return the cm matrix that maps upright, as-displayed coordinates to the
-    page's own coordinates, and the displayed width and height."""
-    box = page.cropbox
-    x0, y0 = float(box.left), float(box.bottom)
-    width, height = float(box.width), float(box.height)
-    rotation = page.rotation % 360
-    if rotation == 90:
-        matrix, shown = (0, 1, -1, 0, x0 + width, y0), (height, width)
-    elif rotation == 180:
-        matrix, shown = (-1, 0, 0, -1, x0 + width, y0 + height), (width, height)
-    elif rotation == 270:
-        matrix, shown = (0, -1, 1, 0, x0, y0 + height), (height, width)
-    else:
-        matrix, shown = (1, 0, 0, 1, x0, y0), (width, height)
-    return [pdf_number(value) for value in matrix], *shown
 
 
 def number_stream(text: str, size: float, position: str, width: float, height: float) -> str:
@@ -2329,7 +1682,7 @@ def stamp_pdf(
             suffix = "marca-de-agua"
 
         try:
-            with heavy_job(job_estimate_mb("stamp", upload_size(file))):
+            with heavy_jobs.heavy_job(job_estimate_mb("stamp", upload_size(file))):
                 writer = PdfWriter(clone_from=open_pdf_reader(file.file))
                 last = first + len(writer.pages) - 1 if mode == "numbers" else 0
                 for index, page in enumerate(writer.pages):
@@ -2503,7 +1856,7 @@ def edit_metadata(
                     detail=f"El campo «{METADATA_LABELS[field]}» no puede superar {MAX_METADATA_LENGTH} caracteres.",
                 )
         reader = open_metadata_reader(file)
-        with heavy_job(job_estimate_mb("metadata", upload_size(file))):
+        with heavy_jobs.heavy_job(job_estimate_mb("metadata", upload_size(file))):
             writer = PdfWriter(clone_from=reader)
             # The old XMP stream repeats the old properties and many viewers
             # prefer it, so it is always dropped; an edit writes a fresh one below.
@@ -2630,7 +1983,7 @@ def extract_text(
         text_path.unlink(missing_ok=True)
 
     # A long extraction must not lose its files to the periodic sweep.
-    with heavy_job(job_estimate_mb("extract-text", upload_size(file)), [file]), \
+    with heavy_jobs.heavy_job(job_estimate_mb("extract-text", upload_size(file)), [file]), \
             protect_from_sweeper(input_path, text_path):
         try:
             with input_path.open("wb") as destination:
@@ -2892,7 +2245,7 @@ def sign_document(
         try:
             # An open file, not the path: pypdf reads a path fully into memory.
             with protect_from_sweeper(path), \
-                    heavy_job(job_estimate_mb("sign", path.stat().st_size, minimum_mb=decoded_mb)), \
+                    heavy_jobs.heavy_job(job_estimate_mb("sign", path.stat().st_size, minimum_mb=decoded_mb)), \
                     path.open("rb") as source:
                 image = load_signature_image(signature)
                 output_path = sign_to_file(source, boxes, image)
@@ -2946,18 +2299,6 @@ OCR_EXIT_ENCRYPTED = 8
 OCR_EXIT_MISSING_DEPENDENCY = 3
 OCR_EXIT_INVALID_CONFIG = 9  # e.g. a Tesseract language pack is missing
 OCR_MISSING_MESSAGE = "El OCR no está disponible: falta ocrmypdf o Tesseract en el servidor."
-
-
-def find_tesseract() -> str | None:
-    return shutil.which("tesseract") or shutil.which("tesseract.exe")
-
-
-def ocrmypdf_installed() -> bool:
-    return importlib.util.find_spec("ocrmypdf") is not None
-
-
-def ocr_available() -> bool:
-    return find_tesseract() is not None and ocrmypdf_installed()
 
 
 def ocr_timeout(page_count: int) -> float:
@@ -3062,7 +2403,7 @@ def ocr_pdf(
         raise HTTPException(status_code=400, detail="El idioma del OCR no es válido.")
     check_upload_sizes([file])
 
-    if not ocr_available():
+    if not external_tools.ocr_available():
         file.file.close()
         raise HTTPException(status_code=503, detail=OCR_MISSING_MESSAGE)
 
@@ -3078,7 +2419,7 @@ def ocr_pdf(
         output_path.unlink(missing_ok=True)
 
     # OCR can run for hours on a big scan: keep the sweep away from its files.
-    with heavy_job(job_estimate_mb("ocr", upload_size(file)), [file]), \
+    with heavy_jobs.heavy_job(job_estimate_mb("ocr", upload_size(file)), [file]), \
             protect_from_sweeper(input_path, output_path):
         try:
             with input_path.open("wb") as destination:
@@ -3104,7 +2445,7 @@ def ocr_pdf(
             # gets a private folder that is removed here whatever happens.
             def run_ocr(pages: list[int]) -> subprocess.CompletedProcess:
                 with tempfile.TemporaryDirectory(prefix="pdf-toolkit-ocr-") as scratch:
-                    return run_tool(
+                    return external_tools.run_tool(
                         ocr_command(language, input_path, output_path, pages),
                         timeout=ocr_timeout(page_count),
                         env={**os.environ, "TMPDIR": scratch, "TEMP": scratch, "TMP": scratch},

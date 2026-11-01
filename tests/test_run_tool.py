@@ -6,6 +6,7 @@ import sys
 import pytest
 
 import app.main as main
+import app.external_tools as external_tools
 
 
 def is_running(pid: int) -> bool:
@@ -28,14 +29,14 @@ def test_timeout_also_kills_the_processes_the_tool_started(tmp_path):
     )
 
     with pytest.raises(subprocess.TimeoutExpired):
-        main.run_tool([sys.executable, "-c", launcher], timeout=2)
+        external_tools.run_tool([sys.executable, "-c", launcher], timeout=2)
 
     child_pid = int(pid_file.read_text())
     assert not is_running(child_pid)
 
 
 def test_returns_output_and_exit_code():
-    result = main.run_tool([sys.executable, "-c", "import sys; print('hola'); sys.exit(3)"], timeout=30)
+    result = external_tools.run_tool([sys.executable, "-c", "import sys; print('hola'); sys.exit(3)"], timeout=30)
 
     assert result.returncode == 3
     assert result.stdout.strip() == "hola"

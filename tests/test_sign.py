@@ -7,6 +7,8 @@ from pypdf import PdfReader, PdfWriter
 import pytest
 
 import app.main as main
+import app.external_tools as external_tools
+import app.pdf_helpers as pdf_helpers
 from conftest import make_pdf, make_png
 
 
@@ -61,7 +63,7 @@ def sign(client, document_id: str, placements, signature: bytes | None = None,
 
 def render(content: bytes, page_index: int = 0) -> Image.Image:
     """Render a page as displayed (pdfium applies /Rotate and the cropbox)."""
-    with main.PDFIUM_LOCK:
+    with pdf_helpers.PDFIUM_LOCK:
         document = pypdfium2.PdfDocument(content)
         try:
             return document[page_index].render(scale=0.5).to_pil().convert("L")
@@ -276,7 +278,7 @@ def test_other_image_formats_rejected(client, image_format):
 def test_eps_signature_rejected(client, monkeypatch):
     document_id = upload(client, blank_pdf([0]))
     # Pillow would hand EPS to Ghostscript; it must never get that far.
-    monkeypatch.setattr(main.subprocess, "Popen", lambda *args, **kwargs: pytest.fail("ran a process"))
+    monkeypatch.setattr(external_tools.subprocess, "Popen", lambda *args, **kwargs: pytest.fail("ran a process"))
     eps = b"%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 10 10\nnewpath 0 0 moveto 10 10 lineto stroke\n%%EOF\n"
     response = sign(client, document_id, [{"page": 1, **BOX}], signature=eps, filename="firma.eps")
     assert response.status_code == 400

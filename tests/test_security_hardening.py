@@ -14,11 +14,18 @@ from pypdf import PageObject, PdfReader, PdfWriter
 import pytest
 
 import app.main as main
+import app.documents as documents
+import app.errors as errors
+import app.external_tools as external_tools
+import app.heavy_jobs as heavy_jobs
+import app.image_helpers as image_helpers
+import app.pdf_helpers as pdf_helpers
+import app.uploads as uploads
 from conftest import make_pdf, make_png
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-needs_ghostscript = pytest.mark.skipif(main.find_ghostscript() is None, reason="Ghostscript is not installed")
-needs_libreoffice = pytest.mark.skipif(main.find_soffice() is None, reason="LibreOffice is not installed")
+needs_ghostscript = pytest.mark.skipif(external_tools.find_ghostscript() is None, reason="Ghostscript is not installed")
+needs_libreoffice = pytest.mark.skipif(external_tools.find_soffice() is None, reason="LibreOffice is not installed")
 
 
 # --- 1. LibreOffice must not fetch linked resources ---------------------------
@@ -43,10 +50,10 @@ def test_office_conversion_seeds_a_locked_down_profile(client, monkeypatch):
         seen.update(profile_settings(profile))
         source = Path(command[-1])
         (source.parent / "source.pdf").write_bytes(make_pdf(1))
-        return main.subprocess.CompletedProcess(command, 0, "", "")
+        return external_tools.subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr(main, "find_soffice", lambda: "soffice")
-    monkeypatch.setattr(main, "run_tool", fake_run_tool)
+    monkeypatch.setattr(external_tools, "find_soffice", lambda: "soffice")
+    monkeypatch.setattr(external_tools, "run_tool", fake_run_tool)
     response = client.post("/api/word-to-pdf", files={"file": ("doc.docx", b"PK fake")})
 
     assert response.status_code == 200
@@ -115,8 +122,8 @@ def test_polyglot_opens_in_pdfium(tmp_path):
     # The premise of the attack: pdfium tolerates the prefix.
     path = tmp_path / "p.pdf"
     path.write_bytes(polyglot())
-    with main.PDFIUM_LOCK:
-        document = main.open_pdfium_document(path)
+    with pdf_helpers.PDFIUM_LOCK:
+        document = documents.open_pdfium_document(path)
         assert len(document) == 1
         document.close()
 
@@ -126,15 +133,15 @@ def test_strip_before_pdf_header(tmp_path, prefix):
     pdf = make_pdf(2)
     path = tmp_path / "in.pdf"
     path.write_bytes(prefix + pdf)
-    main.strip_before_pdf_header(path)
+    pdf_helpers.strip_before_pdf_header(path)
     assert path.read_bytes() == pdf
 
 
 def test_header_missing_or_too_late_is_rejected(tmp_path):
     path = tmp_path / "in.pdf"
     path.write_bytes(b"x" * 1100 + make_pdf(1))
-    with pytest.raises(main.HTTPException) as error:
-        main.strip_before_pdf_header(path)
+    with pytest.raises(errors.HTTPException) as error:
+        pdf_helpers.strip_before_pdf_header(path)
     assert error.value.status_code == 400
 
 
@@ -145,10 +152,10 @@ def test_compress_gives_ghostscript_a_clean_pdf(client, monkeypatch, documents_d
         received.append(Path(command[-1]).read_bytes())
         output = next(part for part in command if part.startswith("-sOutputFile="))
         Path(output.split("=", 1)[1]).write_bytes(b"%PDF-1.4 tiny")
-        return main.subprocess.CompletedProcess(command, 0, "", "")
+        return external_tools.subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr(main, "find_ghostscript", lambda: "gs")
-    monkeypatch.setattr(main, "run_tool", fake_run_tool)
+    monkeypatch.setattr(external_tools, "find_ghostscript", lambda: "gs")
+    monkeypatch.setattr(external_tools, "run_tool", fake_run_tool)
     response = client.post("/api/compress", files={"file": ("p.pdf", polyglot())})
 
     assert response.status_code == 200
@@ -157,11 +164,11 @@ def test_compress_gives_ghostscript_a_clean_pdf(client, monkeypatch, documents_d
 
 
 def test_compress_rejects_file_without_header(client, monkeypatch, documents_dir):
-    monkeypatch.setattr(main, "find_ghostscript", lambda: "gs")
-    monkeypatch.setattr(main, "run_tool", lambda *args, **kwargs: pytest.fail("Ghostscript must not run"))
+    monkeypatch.setattr(external_tools, "find_ghostscript", lambda: "gs")
+    monkeypatch.setattr(external_tools, "run_tool", lambda *args, **kwargs: pytest.fail("Ghostscript must not run"))
     response = client.post("/api/compress", files={"file": ("p.pdf", b"%!PS\n(PWNED) show\n")})
     assert response.status_code == 400
-    assert response.json()["detail"] == main.NOT_A_PDF_MESSAGE
+    assert response.json()["detail"] == pdf_helpers.NOT_A_PDF_MESSAGE
     assert list(documents_dir.iterdir()) == []
 
 
@@ -171,10 +178,10 @@ def test_ocr_gives_ocrmypdf_a_clean_pdf(client, monkeypatch, documents_dir):
     def fake_run_tool(command, timeout, env=None):
         received.append(Path(command[-2]).read_bytes())
         Path(command[-1]).write_bytes(make_pdf(1))
-        return main.subprocess.CompletedProcess(command, 0, "", "")
+        return external_tools.subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr(main, "ocr_available", lambda: True)
-    monkeypatch.setattr(main, "run_tool", fake_run_tool)
+    monkeypatch.setattr(external_tools, "ocr_available", lambda: True)
+    monkeypatch.setattr(external_tools, "run_tool", fake_run_tool)
     response = client.post("/api/ocr", files={"file": ("p.pdf", polyglot())})
 
     assert response.status_code == 200
@@ -195,8 +202,8 @@ def test_real_ghostscript_does_not_run_the_postscript(client, documents_dir):
 # --- 3. Capped page lists -------------------------------------------------------
 
 def test_page_list_limit():
-    assert main.page_list_limit(1) == main.PAGE_LIST_MIN_LIMIT
-    assert main.page_list_limit(1500) == 1500 * main.PAGE_LIST_FACTOR
+    assert pdf_helpers.page_list_limit(1) == pdf_helpers.PAGE_LIST_MIN_LIMIT
+    assert pdf_helpers.page_list_limit(1500) == 1500 * pdf_helpers.PAGE_LIST_FACTOR
 
 
 def test_extract_text_caps_repeated_ranges(client, documents_dir):
@@ -228,12 +235,12 @@ def test_split_zip_caps_ranges(client, monkeypatch):
     assert total.status_code == 400
     assert "máximo para este PDF es 100" in total.json()["detail"]
 
-    monkeypatch.setattr(main, "PAGE_LIST_MIN_LIMIT", 10_000)
+    monkeypatch.setattr(pdf_helpers, "PAGE_LIST_MIN_LIMIT", 10_000)
     count = split(",".join(["1"] * (main.SPLIT_MAX_RANGES + 1)))
     assert count.status_code == 400
     assert f"{main.SPLIT_MAX_RANGES} rangos" in count.json()["detail"]
 
-    monkeypatch.setattr(main, "PAGE_LIST_MIN_LIMIT", 100)
+    monkeypatch.setattr(pdf_helpers, "PAGE_LIST_MIN_LIMIT", 100)
     normal = split("1-2, 3-4")
     assert normal.status_code == 200
     assert len(zipfile.ZipFile(BytesIO(normal.content)).namelist()) == 2
@@ -304,12 +311,12 @@ def recorded_heavy_job(megabytes, uploads=()):
 
 
 def test_pillow_bomb_limit_matches_the_cap():
-    assert Image.MAX_IMAGE_PIXELS == main.IMAGE_MAX_PIXELS
+    assert Image.MAX_IMAGE_PIXELS == image_helpers.IMAGE_MAX_PIXELS
 
 
 def test_images_to_pdf_rejects_pixel_bomb_before_decoding(client, monkeypatch):
     recorded_heavy_job.calls = []
-    monkeypatch.setattr(main, "heavy_job", recorded_heavy_job)
+    monkeypatch.setattr(heavy_jobs, "heavy_job", recorded_heavy_job)
     bomb = png_header_only(13_000, 13_000)
     assert len(bomb) < 1000
 
@@ -322,7 +329,7 @@ def test_images_to_pdf_rejects_pixel_bomb_before_decoding(client, monkeypatch):
 
 def test_images_to_pdf_estimate_counts_decoded_pixels(client, monkeypatch):
     recorded_heavy_job.calls = []
-    monkeypatch.setattr(main, "heavy_job", recorded_heavy_job)
+    monkeypatch.setattr(heavy_jobs, "heavy_job", recorded_heavy_job)
     big = png_header_only(9_000, 9_000)  # 81 Mpx, under the cap, file < 1 KB
 
     client.post("/api/images-to-pdf", files=[
@@ -330,21 +337,21 @@ def test_images_to_pdf_estimate_counts_decoded_pixels(client, monkeypatch):
         ("images", ("grande.png", big, "image/png")),
     ])
 
-    assert recorded_heavy_job.calls == [main.decoded_image_mb(81_000_000)]
-    assert recorded_heavy_job.calls[0] >= main.HEAVY_JOB_MIN_MB  # it waits its turn
+    assert recorded_heavy_job.calls == [heavy_jobs.decoded_image_mb(81_000_000)]
+    assert recorded_heavy_job.calls[0] >= heavy_jobs.HEAVY_JOB_MIN_MB  # it waits its turn
 
 
 def test_small_images_still_skip_the_queue(client, monkeypatch):
     recorded_heavy_job.calls = []
-    monkeypatch.setattr(main, "heavy_job", recorded_heavy_job)
+    monkeypatch.setattr(heavy_jobs, "heavy_job", recorded_heavy_job)
     response = client.post("/api/images-to-pdf", files=[("images", ("a.png", make_png(), "image/png"))])
     assert response.status_code == 200
-    assert recorded_heavy_job.calls[0] < main.HEAVY_JOB_MIN_MB
+    assert recorded_heavy_job.calls[0] < heavy_jobs.HEAVY_JOB_MIN_MB
 
 
 def test_job_estimate_minimum_applies_to_small_files():
-    assert main.job_estimate_mb("images-to-pdf", 1000, minimum_mb=500) == 500
-    assert main.job_estimate_mb("images-to-pdf", 1000) == 0
+    assert heavy_jobs.job_estimate_mb("images-to-pdf", 1000, minimum_mb=500) == 500
+    assert heavy_jobs.job_estimate_mb("images-to-pdf", 1000) == 0
 
 
 def test_signature_pixel_bomb_is_rejected(client):
@@ -415,10 +422,10 @@ def test_api_docs_are_disabled(client, path):
 
 def test_output_names_are_capped(client):
     long_name = "a" * 5000
-    assert main.clean_output_name(long_name) == "a" * main.MAX_OUTPUT_NAME_LENGTH + ".pdf"
-    assert main.clean_output_name(long_name + ".pdf") == "a" * main.MAX_OUTPUT_NAME_LENGTH + ".pdf"
-    assert main.clean_text_output_name(long_name, "texto") == "a" * main.MAX_OUTPUT_NAME_LENGTH + ".txt"
-    assert main.clean_output_name("informe.pdf") == "informe.pdf"
+    assert uploads.clean_output_name(long_name) == "a" * uploads.MAX_OUTPUT_NAME_LENGTH + ".pdf"
+    assert uploads.clean_output_name(long_name + ".pdf") == "a" * uploads.MAX_OUTPUT_NAME_LENGTH + ".pdf"
+    assert main.clean_text_output_name(long_name, "texto") == "a" * uploads.MAX_OUTPUT_NAME_LENGTH + ".txt"
+    assert uploads.clean_output_name("informe.pdf") == "informe.pdf"
 
     response = client.post("/api/merge", files=[("files", ("a.pdf", make_pdf(1)))], data={"output_name": long_name})
     assert response.status_code == 200

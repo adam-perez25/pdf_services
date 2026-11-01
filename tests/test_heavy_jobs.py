@@ -16,6 +16,9 @@ import pytest
 
 import app.main as main
 import app.config as config
+import app.documents as documents
+import app.external_tools as external_tools
+import app.heavy_jobs as heavy_jobs
 from conftest import make_pdf
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -47,7 +50,7 @@ class Waiter:
 # --- The limiter itself ------------------------------------------------------
 
 def test_two_big_jobs_run_one_after_the_other():
-    limiter = main.HeavyJobLimiter()
+    limiter = heavy_jobs.HeavyJobLimiter()
     assert limiter.acquire(80, 100, 0)
 
     second = Waiter(limiter, 80)
@@ -62,7 +65,7 @@ def test_two_big_jobs_run_one_after_the_other():
 
 
 def test_jobs_that_fit_run_together():
-    limiter = main.HeavyJobLimiter()
+    limiter = heavy_jobs.HeavyJobLimiter()
     # wait_seconds=0: each one must get in at once, without waiting.
     assert all(limiter.acquire(30, 100, 0) for _ in range(3))
     assert limiter.status()["running"] == 3
@@ -70,7 +73,7 @@ def test_jobs_that_fit_run_together():
 
 
 def test_a_job_bigger_than_the_budget_runs_alone():
-    limiter = main.HeavyJobLimiter()
+    limiter = heavy_jobs.HeavyJobLimiter()
     assert limiter.acquire(500, 100, 0)
     assert not limiter.acquire(10, 100, 0)
     limiter.release(500)
@@ -80,7 +83,7 @@ def test_a_job_bigger_than_the_budget_runs_alone():
 
 
 def test_a_waiting_big_job_is_not_overtaken():
-    limiter = main.HeavyJobLimiter()
+    limiter = heavy_jobs.HeavyJobLimiter()
     assert limiter.acquire(60, 100, 0)
     big = Waiter(limiter, 80)
     wait_until(lambda: limiter.status()["waiting"] == 1)
@@ -97,7 +100,7 @@ def test_a_waiting_big_job_is_not_overtaken():
 
 
 def test_a_job_that_gives_up_lets_the_next_one_go():
-    limiter = main.HeavyJobLimiter()
+    limiter = heavy_jobs.HeavyJobLimiter()
     assert limiter.acquire(60, 100, 0)
     big = Waiter(limiter, 80, wait_seconds=0.1)
     wait_until(lambda: limiter.status()["waiting"] == 1)
@@ -110,8 +113,8 @@ def test_a_job_that_gives_up_lets_the_next_one_go():
 
 @pytest.fixture
 def limiter(monkeypatch):
-    fresh = main.HeavyJobLimiter()
-    monkeypatch.setattr(main, "HEAVY_JOBS", fresh)
+    fresh = heavy_jobs.HeavyJobLimiter()
+    monkeypatch.setattr(heavy_jobs, "HEAVY_JOBS", fresh)
     monkeypatch.setattr(config, "HEAVY_JOB_BUDGET_MB", 1000)
     return fresh
 
@@ -122,21 +125,21 @@ def test_heavy_job_answers_503_after_waiting_too_long(limiter, monkeypatch):
     class Upload:
         file = BytesIO(b"x")
 
-    with main.heavy_job(1000):
+    with heavy_jobs.heavy_job(1000):
         with pytest.raises(HTTPException) as caught:
-            with main.heavy_job(500, [Upload]):
+            with heavy_jobs.heavy_job(500, [Upload]):
                 pass
 
     assert caught.value.status_code == 503
-    assert caught.value.detail == main.HEAVY_JOB_BUSY_MESSAGE
-    assert caught.value.headers["Retry-After"] == str(main.HEAVY_JOB_RETRY_AFTER_SECONDS)
+    assert caught.value.detail == heavy_jobs.HEAVY_JOB_BUSY_MESSAGE
+    assert caught.value.headers["Retry-After"] == str(heavy_jobs.HEAVY_JOB_RETRY_AFTER_SECONDS)
     assert Upload.file.closed
     assert limiter.status() == {"running": 0, "reserved_mb": 0, "waiting": 0}
 
 
 def test_heavy_job_releases_its_share_when_the_job_fails(limiter):
     with pytest.raises(ValueError):
-        with main.heavy_job(400):
+        with heavy_jobs.heavy_job(400):
             assert limiter.status()["reserved_mb"] == 400
             raise ValueError("falla")
 
@@ -145,23 +148,23 @@ def test_heavy_job_releases_its_share_when_the_job_fails(limiter):
 
 def test_small_jobs_skip_the_line(limiter, monkeypatch):
     monkeypatch.setattr(config, "HEAVY_JOB_WAIT_SECONDS", 0)
-    with main.heavy_job(5000):
-        with main.heavy_job(main.HEAVY_JOB_MIN_MB - 1), main.heavy_job(1):
+    with heavy_jobs.heavy_job(5000):
+        with heavy_jobs.heavy_job(heavy_jobs.HEAVY_JOB_MIN_MB - 1), heavy_jobs.heavy_job(1):
             assert limiter.status() == {"running": 1, "reserved_mb": 5000, "waiting": 0}
 
 
 def test_estimates():
     megabyte = 1024 * 1024
-    assert main.job_estimate_mb("protect", 200 * megabyte) == 700
-    assert main.job_estimate_mb("merge", 100 * megabyte, 100 * megabyte) == 260
-    assert main.job_estimate_mb("compress", 60 * megabyte) == 330
+    assert heavy_jobs.job_estimate_mb("protect", 200 * megabyte) == 700
+    assert heavy_jobs.job_estimate_mb("merge", 100 * megabyte, 100 * megabyte) == 260
+    assert heavy_jobs.job_estimate_mb("compress", 60 * megabyte) == 330
     # Small files never wait, even on tools with a big fixed part.
-    for tool in main.HEAVY_JOB_ESTIMATES:
-        assert main.job_estimate_mb(tool, 2 * megabyte) == 0, tool
-    assert main.job_estimate_mb("merge", 20 * megabyte, 20 * megabyte) == 0
-    assert main.job_estimate_mb("merge", 30 * megabyte, 30 * megabyte) == 78
+    for tool in heavy_jobs.HEAVY_JOB_ESTIMATES:
+        assert heavy_jobs.job_estimate_mb(tool, 2 * megabyte) == 0, tool
+    assert heavy_jobs.job_estimate_mb("merge", 20 * megabyte, 20 * megabyte) == 0
+    assert heavy_jobs.job_estimate_mb("merge", 30 * megabyte, 30 * megabyte) == 78
     # The usual few-MB PDF never waits in pypdf tools.
-    assert main.job_estimate_mb("stamp", 5 * megabyte) < main.HEAVY_JOB_MIN_MB
+    assert heavy_jobs.job_estimate_mb("stamp", 5 * megabyte) < heavy_jobs.HEAVY_JOB_MIN_MB
 
 
 # --- Settings ----------------------------------------------------------------
@@ -205,12 +208,12 @@ def slow_compress(limiter, monkeypatch):
         shutil.copyfile(command[-1], output.split("=", 1)[1])
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr(main, "find_ghostscript", lambda: "gs")
-    monkeypatch.setattr(main, "run_tool", fake_run_tool)
+    monkeypatch.setattr(external_tools, "find_ghostscript", lambda: "gs")
+    monkeypatch.setattr(external_tools, "run_tool", fake_run_tool)
     # Every compression counts as bigger than the whole budget.
-    monkeypatch.setattr(main, "HEAVY_JOB_ESTIMATES", {**main.HEAVY_JOB_ESTIMATES, "compress": (0, 1500)})
+    monkeypatch.setattr(heavy_jobs, "HEAVY_JOB_ESTIMATES", {**heavy_jobs.HEAVY_JOB_ESTIMATES, "compress": (0, 1500)})
     # The sample PDF is tiny; let it count as a big job for these tests.
-    monkeypatch.setattr(main, "HEAVY_JOB_SMALL_FILES_MB", 0)
+    monkeypatch.setattr(heavy_jobs, "HEAVY_JOB_SMALL_FILES_MB", 0)
     return started, release
 
 
@@ -246,8 +249,8 @@ def test_second_big_request_gets_503_while_the_first_runs(client, sample_pdf, sl
     monkeypatch.setattr(config, "HEAVY_JOB_WAIT_SECONDS", 0)
     busy = post_compress(sample_pdf)
     assert busy.status_code == 503
-    assert busy.json()["detail"] == main.HEAVY_JOB_BUSY_MESSAGE
-    assert busy.headers["Retry-After"] == str(main.HEAVY_JOB_RETRY_AFTER_SECONDS)
+    assert busy.json()["detail"] == heavy_jobs.HEAVY_JOB_BUSY_MESSAGE
+    assert busy.headers["Retry-After"] == str(heavy_jobs.HEAVY_JOB_RETRY_AFTER_SECONDS)
 
     release.set()
     first.join(5)
@@ -275,7 +278,7 @@ def test_second_big_request_waits_for_the_first(client, sample_pdf, slow_compres
 
 
 def test_full_queue_answers_at_once():
-    limiter = main.HeavyJobLimiter()
+    limiter = heavy_jobs.HeavyJobLimiter()
     assert limiter.acquire(80, 100, 0)
     first = Waiter(limiter, 80)
     wait_until(lambda: limiter.status()["waiting"] == 1)
@@ -299,10 +302,10 @@ def test_waiting_organizer_save_keeps_its_document(client, documents_dir, monkey
 
     @contextlib.contextmanager
     def fake_heavy_job(megabytes, uploads=()):
-        seen["protected"] = path in main.ACTIVE_JOB_FILES
+        seen["protected"] = path in documents.ACTIVE_JOB_FILES
         yield
 
-    monkeypatch.setattr(main, "heavy_job", fake_heavy_job)
+    monkeypatch.setattr(heavy_jobs, "heavy_job", fake_heavy_job)
 
     response = client.post(f"/api/documents/{upload.json()['id']}/edit", data={"pages": '[{"page": 1}]'})
 
@@ -312,17 +315,17 @@ def test_waiting_organizer_save_keeps_its_document(client, documents_dir, monkey
 
 def test_big_jobs_return_freed_memory_with_malloc_trim(monkeypatch):
     trims = []
-    monkeypatch.setattr(main, "MALLOC_TRIM", lambda pad: trims.append(pad) or 1)
-    monkeypatch.setattr(main, "MALLOC_TRIM_DELAY_SECONDS", 0.01)
+    monkeypatch.setattr(heavy_jobs, "MALLOC_TRIM", lambda pad: trims.append(pad) or 1)
+    monkeypatch.setattr(heavy_jobs, "MALLOC_TRIM_DELAY_SECONDS", 0.01)
 
-    with main.heavy_job(main.HEAVY_JOB_MIN_MB - 1):
+    with heavy_jobs.heavy_job(heavy_jobs.HEAVY_JOB_MIN_MB - 1):
         pass
     time.sleep(0.1)
     assert trims == []  # small jobs never trim
 
-    with main.heavy_job(main.HEAVY_JOB_MIN_MB):
+    with heavy_jobs.heavy_job(heavy_jobs.HEAVY_JOB_MIN_MB):
         pass
-    with main.heavy_job(main.HEAVY_JOB_MIN_MB):
+    with heavy_jobs.heavy_job(heavy_jobs.HEAVY_JOB_MIN_MB):
         pass
     wait_until(lambda: trims)
     time.sleep(0.1)
@@ -331,13 +334,13 @@ def test_big_jobs_return_freed_memory_with_malloc_trim(monkeypatch):
 
 def test_steady_big_jobs_do_not_postpone_the_trim_forever(monkeypatch):
     trims = []
-    monkeypatch.setattr(main, "MALLOC_TRIM", lambda pad: trims.append(pad) or 1)
-    monkeypatch.setattr(main, "MALLOC_TRIM_DELAY_SECONDS", 0.2)
+    monkeypatch.setattr(heavy_jobs, "MALLOC_TRIM", lambda pad: trims.append(pad) or 1)
+    monkeypatch.setattr(heavy_jobs, "MALLOC_TRIM_DELAY_SECONDS", 0.2)
 
     # A job ends every 0.05 s for longer than the delay: one trim still runs.
     deadline = time.monotonic() + 0.5
     while time.monotonic() < deadline:
-        with main.heavy_job(main.HEAVY_JOB_MIN_MB):
+        with heavy_jobs.heavy_job(heavy_jobs.HEAVY_JOB_MIN_MB):
             pass
         time.sleep(0.05)
     assert trims, "the trim kept being postponed"
@@ -345,12 +348,12 @@ def test_steady_big_jobs_do_not_postpone_the_trim_forever(monkeypatch):
 
 def test_malloc_trim_is_optional(monkeypatch):
     # Windows and musl have no malloc_trim: releasing does nothing.
-    monkeypatch.setattr(main, "MALLOC_TRIM", None)
-    with main.heavy_job(main.HEAVY_JOB_MIN_MB):
+    monkeypatch.setattr(heavy_jobs, "MALLOC_TRIM", None)
+    with heavy_jobs.heavy_job(heavy_jobs.HEAVY_JOB_MIN_MB):
         pass
-    assert main.release_free_memory() is None
+    assert heavy_jobs.release_free_memory() is None
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="glibc only")
 def test_malloc_trim_is_found_on_glibc():
-    assert main.MALLOC_TRIM is not None
+    assert heavy_jobs.MALLOC_TRIM is not None

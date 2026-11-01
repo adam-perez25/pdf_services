@@ -5,9 +5,10 @@ from pypdf import PdfReader
 import pytest
 
 import app.main as main
+import app.external_tools as external_tools
 from conftest import make_pdf
 
-needs_ghostscript = pytest.mark.skipif(main.find_ghostscript() is None, reason="Ghostscript is not installed")
+needs_ghostscript = pytest.mark.skipif(external_tools.find_ghostscript() is None, reason="Ghostscript is not installed")
 
 
 def make_scanned_pdf(page_count: int = 2) -> bytes:
@@ -86,7 +87,7 @@ def test_non_pdf_is_rejected(client):
 
 
 def test_missing_ghostscript_is_reported(client, monkeypatch, documents_dir):
-    monkeypatch.setattr(main, "find_ghostscript", lambda: None)
+    monkeypatch.setattr(external_tools, "find_ghostscript", lambda: None)
 
     response = compress(client, make_pdf(1))
 

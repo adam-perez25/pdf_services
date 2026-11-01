@@ -10,9 +10,12 @@ import pytest
 
 import app.main as main
 import app.config as config
+import app.documents as documents
+import app.errors as errors
+import app.external_tools as external_tools
 from conftest import make_pdf
 
-needs_tesseract = pytest.mark.skipif(not main.ocr_available(), reason="ocrmypdf or Tesseract is not installed")
+needs_tesseract = pytest.mark.skipif(not external_tools.ocr_available(), reason="ocrmypdf or Tesseract is not installed")
 
 
 def make_image_only_pdf(words: list[str]) -> bytes:
@@ -54,7 +57,7 @@ def encrypted_pdf_bytes() -> bytes:
 @pytest.fixture
 def ocr_ready(monkeypatch):
     # Lets the validation tests run without ocrmypdf or Tesseract installed.
-    monkeypatch.setattr(main, "ocr_available", lambda: True)
+    monkeypatch.setattr(external_tools, "ocr_available", lambda: True)
 
 
 @needs_tesseract
@@ -131,7 +134,7 @@ def test_encrypted_pdf_is_rejected(client, ocr_ready, documents_dir):
     response = ocr(client, encrypted_pdf_bytes())
 
     assert response.status_code == 400
-    assert response.json()["detail"] == main.ENCRYPTED_PDF_MESSAGE
+    assert response.json()["detail"] == errors.ENCRYPTED_PDF_MESSAGE
     assert list(documents_dir.iterdir()) == []
 
 
@@ -145,7 +148,7 @@ def test_too_many_pages_is_rejected(client, ocr_ready, monkeypatch, documents_di
 
 
 def test_missing_tesseract_is_reported(client, monkeypatch, documents_dir):
-    monkeypatch.setattr(main, "find_tesseract", lambda: None)
+    monkeypatch.setattr(external_tools, "find_tesseract", lambda: None)
 
     response = ocr(client, make_pdf(1))
 
@@ -154,8 +157,8 @@ def test_missing_tesseract_is_reported(client, monkeypatch, documents_dir):
 
 
 def test_missing_ocrmypdf_is_reported(client, monkeypatch):
-    monkeypatch.setattr(main, "find_tesseract", lambda: "/usr/bin/tesseract")
-    monkeypatch.setattr(main, "ocrmypdf_installed", lambda: False)
+    monkeypatch.setattr(external_tools, "find_tesseract", lambda: "/usr/bin/tesseract")
+    monkeypatch.setattr(external_tools, "ocrmypdf_installed", lambda: False)
 
     assert ocr(client, make_pdf(1)).status_code == 503
 
@@ -163,7 +166,7 @@ def test_missing_ocrmypdf_is_reported(client, monkeypatch):
 @pytest.mark.parametrize(
     ("exit_code", "status", "detail"),
     [
-        (main.OCR_EXIT_ENCRYPTED, 400, main.ENCRYPTED_PDF_MESSAGE),
+        (main.OCR_EXIT_ENCRYPTED, 400, errors.ENCRYPTED_PDF_MESSAGE),
         (main.OCR_EXIT_INVALID_CONFIG, 503, main.OCR_MISSING_MESSAGE),
         (15, 400, "No se pudo aplicar el OCR al PDF."),
     ],
@@ -172,7 +175,7 @@ def test_ocrmypdf_exit_codes(client, ocr_ready, monkeypatch, documents_dir, exit
     def fake_run_tool(command, timeout, env=None):
         return subprocess.CompletedProcess(command, exit_code, "", "/secret/path traceback")
 
-    monkeypatch.setattr(main, "run_tool", fake_run_tool)
+    monkeypatch.setattr(external_tools, "run_tool", fake_run_tool)
 
     response = ocr(client, make_pdf(1))
 
@@ -191,7 +194,7 @@ def test_timeout_is_reported(client, ocr_ready, monkeypatch, documents_dir):
         seen["tmpdir"] = env["TMPDIR"]
         raise subprocess.TimeoutExpired(command, timeout)
 
-    monkeypatch.setattr(main, "run_tool", slow_run_tool)
+    monkeypatch.setattr(external_tools, "run_tool", slow_run_tool)
 
     response = ocr(client, make_pdf(2))
 
@@ -218,11 +221,11 @@ def test_long_ocr_survives_a_sweep(client, ocr_ready, monkeypatch, documents_dir
         old = time.time() - config.DOCUMENT_TTL_SECONDS - 60
         for path in documents_dir.iterdir():
             os.utime(path, (old, old))
-        main.remove_expired_documents()
+        documents.remove_expired_documents()
         seen["left"] = sorted(path.name for path in documents_dir.iterdir())
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr(main, "run_tool", slow_run_tool)
+    monkeypatch.setattr(external_tools, "run_tool", slow_run_tool)
 
     response = ocr(client, make_pdf(2))
 
@@ -262,7 +265,7 @@ def capture_command(monkeypatch) -> dict:
         Path(command[-1]).write_bytes(Path(command[-2]).read_bytes())
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr(main, "run_tool", fake_run_tool)
+    monkeypatch.setattr(external_tools, "run_tool", fake_run_tool)
     return seen
 
 
@@ -391,7 +394,7 @@ def test_redo_ocr_refusal_falls_back_to_skip_text(client, ocr_ready, monkeypatch
         Path(command[-1]).write_bytes(Path(command[-2]).read_bytes())
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr(main, "run_tool", fake_run_tool)
+    monkeypatch.setattr(external_tools, "run_tool", fake_run_tool)
 
     response = ocr(client, make_mixed_pdf())
 

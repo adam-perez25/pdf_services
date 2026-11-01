@@ -6,10 +6,14 @@ import pytest
 
 import app.main as main
 import app.config as config
+import app.errors as errors
+import app.external_tools as external_tools
+import app.pdf_helpers as pdf_helpers
+import app.uploads as uploads
 from conftest import make_pdf, make_png
 
 
-ENCRYPTED_DETAIL = main.ENCRYPTED_PDF_MESSAGE
+ENCRYPTED_DETAIL = errors.ENCRYPTED_PDF_MESSAGE
 
 
 def make_encrypted_pdf(user_password: str = "secreto", owner_password: str | None = None) -> bytes:
@@ -115,7 +119,7 @@ def test_errors_do_not_leak_exception_text(client, monkeypatch, caplog):
     def broken_reader(source):
         raise RuntimeError("detalle-interno-secreto /ruta/privada")
 
-    monkeypatch.setattr(main, "PdfReader", broken_reader)
+    monkeypatch.setattr(pdf_helpers, "PdfReader", broken_reader)
     with caplog.at_level(logging.WARNING):
         response = client.post("/api/pdf-info", files={"file": ("a.pdf", make_pdf(1), "application/pdf")})
 
@@ -186,7 +190,7 @@ def test_merge_rejects_encrypted_pdf(client):
     assert response.json()["detail"] == ENCRYPTED_DETAIL
 
 
-@pytest.mark.skipif(main.find_ghostscript() is None, reason="Ghostscript no está instalado")
+@pytest.mark.skipif(external_tools.find_ghostscript() is None, reason="Ghostscript no está instalado")
 def test_compress_rejects_encrypted_pdf(client, documents_dir):
     response = client.post(
         "/api/compress", files={"file": ("locked.pdf", make_encrypted_pdf(), "application/pdf")}
@@ -260,7 +264,7 @@ def test_requests_within_the_limit_pass_the_middleware(client):
     ],
 )
 def test_content_disposition_has_ascii_fallback_and_utf8_name(name, expected):
-    assert main.content_disposition(name) == expected
+    assert uploads.content_disposition(name) == expected
 
 
 @pytest.mark.parametrize(
@@ -277,7 +281,7 @@ def test_content_disposition_has_ascii_fallback_and_utf8_name(name, expected):
     ],
 )
 def test_clean_base_name_keeps_letters_of_any_alphabet(raw, expected):
-    assert main.clean_base_name(raw, "fallback") == expected
+    assert uploads.clean_base_name(raw, "fallback") == expected
 
 
 @pytest.mark.parametrize(
