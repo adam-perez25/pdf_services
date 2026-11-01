@@ -42,6 +42,17 @@ The service will become a microservice in a home lab, reachable from the local n
 | 4 | ~~PDF/A and repair PDF~~ (done) | `feature/pdfa-repair` | M | Ghostscript is already in the image. PDF/A for official paperwork; repair re-saves damaged PDFs. Same pattern as compress (`strip_before_pdf_header`, `heavy_job`), plus a workflow step. |
 | 5 | Extract embedded images | `feature/extract-images` | S-M | Pull the original images out of a PDF (not a page render) into a ZIP with pypdf. |
 
+### UI redesign (approved plan, in this order)
+
+Every page and the menu get a new look. The 17 tools are one flat grid today, numbered as if they were a sequence, with no way to switch tool without going back to `/`. Element ids that the page scripts use stay as they are. Static HTML/CSS/JS only (strict CSP, no external hosts), colors stay CSS variables with a dark-mode block (`test_dark_mode`).
+
+| # | Item | Branch | Summary |
+|---|---|---|---|
+| a | Foundation and menu | `feature/ui-foundation` | New `styles.css` design system; `static/tools.js` as the single list of tools (id, title, group, path, summary) read by the home page and a side navigation (collapses to a menu button on phones; `aria-current`; skip link); home grouped by task (Unir y organizar, Convertir a PDF, Reducir y archivar, Proteger y firmar, Extraer texto, Flujo de trabajo) with a search box (`/` focuses it) and a `<noscript>` link list. This reverses the earlier "search on the home page" decision, now that there are 17 tools. |
+| b | Tool pages | `feature/ui-tool-pages` | All pages on one layout: file area on the left, options and a sticky action bar on the right, a "1 Elige el archivo, 2 Ajusta, 3 Descarga" strip (a real sequence), a clear result panel, the existing Cancelar button. Reorderable lists (merge, images, workflow steps, page organizer) get a visible drag handle, up/down buttons of at least 44 px, a drop-position line and keyboard reordering. |
+
+Design direction: cool paper background and one deep "stamp blue" accent, a muted folder-tab color per group, keep the bundled Manrope (no new downloads), drop the monospace all-caps labels. Quality floor: visible focus rings, AA contrast, reduced motion, checked at phone width in the built-in browser. Tests to update: the "SERVICIO NN" headings checked in `test_workflow` and `test_pdfa_repair`; add one test that `tools.js` lists every page route.
+
 Bigger, later:
 
 - **Fill and flatten PDF forms:** list the AcroForm fields with their types, fill them, optionally lock them. L.

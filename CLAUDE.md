@@ -96,6 +96,10 @@ Spanish-language web PDF toolkit: `FastAPI(title="Unir PDF")` in `app/main.py` (
 - Frontend state lives only in page JS variables.
 
 ### Conventions
+- **Every new feature must be modular and cancelable.**
+  - Modular: one router in `app/routers/` per tool, its page route in `routers/html_pages.py`, its template and script, and its own test file; shared logic goes in the `app/*.py` helpers, never in `main.py`.
+  - Cancelable, following the cancel logic already built (`app/cancellation.py`): an endpoint that runs an external tool or any long job takes `request: Request` and wraps its work in `with cancellation.cancellable_job(request), heavy_jobs.heavy_job(...)` (cancellable outermost). Waits go through `external_tools.run_tool` or poll `cancellation.current_check()`; `JobCancelled` (HTTP 499) must reach the existing `except HTTPException` cleanup so job files and the heavy-job reservation are released. The page sends its request with `postForm` so the Cancelar button and `X-Job-Id` work.
+  - Test it like `tests/test_cancel_jobs.py`: a cancelled job answers 499 and leaves `DOCUMENTS_DIR` empty.
 - API endpoints are sync `def`; page routes are `async def`. Error `detail` strings, UI text and README are in Spanish.
 - Multi-file output is a `ZIP_STORED` archive with parts named `<base>-page-NNN` (4 digits from 1000 pages). A single result is returned as the plain file instead.
 - Work files go in DOCUMENTS_DIR or a `TemporaryDirectory`, never in the code dir.
