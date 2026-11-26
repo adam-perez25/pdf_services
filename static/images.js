@@ -10,15 +10,18 @@ const progress = uploadProgress(imagesStatus);
 
 let selectedImages = [];
 
+// New picks and drops are added to the list, never replace it.
 imagesInput.addEventListener("change", () => {
-    selectedImages = [...imagesInput.files].filter(isImage);
-    renderImages();
+    addImages([...imagesInput.files]);
+    imagesInput.value = "";
 });
 
-setupDropzone(imagesDropzone, (files) => {
-    selectedImages = files.filter(isImage);
+setupDropzone(imagesDropzone, addImages);
+
+function addImages(files) {
+    selectedImages = [...selectedImages, ...files.filter(isImage)];
     renderImages();
-});
+}
 
 function renderImages() {
     imagesList.innerHTML = "";

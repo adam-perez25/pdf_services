@@ -11,15 +11,18 @@ const progress = uploadProgress(status);
 
 let selectedFiles = [];
 
+// New picks and drops are added to the list, never replace it.
 fileInput.addEventListener("change", () => {
-    selectedFiles = [...fileInput.files];
-    renderFiles();
+    addFiles([...fileInput.files]);
+    fileInput.value = "";
 });
 
-setupDropzone(dropzone, (files) => {
-    selectedFiles = files.filter(isPdf);
+setupDropzone(dropzone, addFiles);
+
+function addFiles(files) {
+    selectedFiles = [...selectedFiles, ...files.filter(isPdf)];
     renderFiles();
-});
+}
 
 function renderFiles() {
     fileList.innerHTML = "";

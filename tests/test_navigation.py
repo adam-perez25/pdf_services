@@ -102,6 +102,24 @@ def test_reorderable_lists_use_the_shared_handle():
         assert needle in common, needle
 
 
+@pytest.mark.parametrize("script, list_name", [
+    ("merge.js", "selectedFiles"),
+    ("images.js", "selectedImages"),
+    ("workflow.js", "selectedFiles"),
+])
+def test_multi_file_lists_add_instead_of_replacing(script, list_name):
+    # Picking or dropping more files must add them to the list, not replace
+    # the files chosen before (the images page used to drop the first image).
+    code = (ROOT / "static" / script).read_text(encoding="utf-8")
+    assignments = re.findall(rf"\b{list_name} = ([^;]+);", code)
+    for value in assignments:
+        assert value == "[]" or value.startswith(f"[...{list_name},"), (script, value)
+    assert any(value.startswith(f"[...{list_name},") for value in assignments), script
+    # The input is cleared after each pick, so choosing the same file again
+    # still fires "change".
+    assert re.search(r'Input\.value = "";', code.split("setupDropzone(")[0]), script
+
+
 def test_every_success_message_shows_the_result_panel():
     # Each tool marks its finished download with the "done" state.
     for script in sorted((ROOT / "static").glob("*.js")):
