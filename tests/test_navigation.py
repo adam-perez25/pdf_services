@@ -120,6 +120,14 @@ def test_multi_file_lists_add_instead_of_replacing(script, list_name):
     assert re.search(r'Input\.value = "";', code.split("setupDropzone(")[0]), script
 
 
+def test_step_strip_reads_files_before_the_page_clears_the_input():
+    # Pages clear the file input in their own "change" handler, so the shared
+    # step-2 listener must run in the capture phase, before them.
+    common = (ROOT / "static" / "common.js").read_text(encoding="utf-8")
+    listener = common[common.index('document.addEventListener("change"'):]
+    assert re.match(r'document\.addEventListener\("change", .*?\n\}, true\);', listener, re.S)
+
+
 def test_every_success_message_shows_the_result_panel():
     # Each tool marks its finished download with the "done" state.
     for script in sorted((ROOT / "static").glob("*.js")):
