@@ -28,9 +28,11 @@ function markStep(number) {
     });
 }
 
+// Capture phase: runs before the page's own "change" handler, which may clear
+// the input (input.value = "") right after reading its files.
 document.addEventListener("change", (event) => {
     if (event.target.matches?.('input[type="file"]') && event.target.files.length) markStep(2);
-});
+}, true);
 
 // state: true for an error, "done" when the result was downloaded (shown as
 // the result panel), false for progress and other messages.

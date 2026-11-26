@@ -373,14 +373,15 @@ function forgetLastResult() {
 // ---- Files (same list behaviour as merge.js) ----
 
 workflowInput.addEventListener("change", () => {
-    setFiles([...workflowInput.files]);
+    addFiles([...workflowInput.files]);
     workflowInput.value = "";
 });
-setupDropzone(workflowDropzone, (files) => setFiles(files.filter(isPdf)));
+setupDropzone(workflowDropzone, (files) => addFiles(files.filter(isPdf)));
 
-function setFiles(files) {
+// New picks and drops are added to the list, never replace it.
+function addFiles(files) {
     if (running) return;
-    selectedFiles = files;
+    selectedFiles = [...selectedFiles, ...files];
     forgetLastResult();
     renderFiles();
 }
